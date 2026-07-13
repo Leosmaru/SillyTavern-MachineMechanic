@@ -12191,7 +12191,53 @@ function scheduleFloatingClipUpdate() {
   if (floatingClipUpdateTimer) clearTimeout(floatingClipUpdateTimer);
   floatingClipUpdateTimer = setTimeout(updateFloatingClipButton, 60);
 }
+function stmbSiblingMes(mes, dir) {
+  let n = mes ? dir === "prev" ? mes.previousElementSibling : mes.nextElementSibling : null;
+  while (n && !n.classList.contains("mes")) {
+    n = dir === "prev" ? n.previousElementSibling : n.nextElementSibling;
+  }
+  return n;
+}
+function stmbExtendSelectionByMessage(dir) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  const range = sel.getRangeAt(0);
+  const mesOf = (node) => {
+    const el = node && node.nodeType === Node.ELEMENT_NODE ? node : node ? node.parentElement : null;
+    return el ? el.closest(".mes") : null;
+  };
+  const textOf = (mes) => mes ? mes.querySelector(".mes_text") : null;
+  if (dir === "prev") {
+    const prevText = textOf(stmbSiblingMes(mesOf(range.startContainer), "prev"));
+    if (prevText) range.setStart(prevText, 0);
+  } else {
+    const nextText = textOf(stmbSiblingMes(mesOf(range.endContainer), "next"));
+    if (nextText) range.setEnd(nextText, nextText.childNodes.length);
+  }
+  sel.removeAllRanges();
+  sel.addRange(range);
+  scheduleFloatingClipUpdate();
+}
+function stmbCreateFloatingArrow(dir) {
+  const arrow = document.createElement("div");
+  const icon = dir === "prev" ? "fa-chevron-left" : "fa-chevron-right";
+  arrow.classList.add("stmb_floating_clip_arrow", "fa-solid", icon, "interactable");
+  arrow.title = dir === "prev" ? "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043F\u0440\u0435\u0434\u044B\u0434\u0443\u0449\u0435\u0435 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u043A \u0432\u044B\u0434\u0435\u043B\u0435\u043D\u0438\u044E" : "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0435\u0435 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u043A \u0432\u044B\u0434\u0435\u043B\u0435\u043D\u0438\u044E";
+  arrow.setAttribute("tabindex", "0");
+  arrow.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  arrow.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    stmbExtendSelectionByMessage(dir);
+  });
+  return arrow;
+}
 function createFloatingClipButton() {
+  const wrap = document.createElement("div");
+  wrap.classList.add("stmb_floating_clip_wrap");
   const button = document.createElement("div");
   button.classList.add("stmb_floating_clip_button", "fa-solid", "fa-scissors", "interactable");
   button.title = tr3("STMemoryBooks_Clip_ButtonTitle", "Clip highlighted text to Memory Book");
@@ -12211,8 +12257,9 @@ function createFloatingClipButton() {
     }
     await openClipModalFromSelection({ selectedText: state.selectedText, source: "floating" });
   });
-  document.body.appendChild(button);
-  return button;
+  wrap.append(stmbCreateFloatingArrow("prev"), button, stmbCreateFloatingArrow("next"));
+  document.body.appendChild(wrap);
+  return wrap;
 }
 function updateFloatingClipButton() {
   floatingClipUpdateTimer = null;

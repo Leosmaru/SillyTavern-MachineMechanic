@@ -554,3 +554,37 @@
   flex: 0 0 auto;
   cursor: pointer;
 }
+.stmb_floating_clip_wrap {
+  position: fixed;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.stmb_floating_clip_wrap .stmb_floating_clip_button {
+  position: static;
+}
+.stmb_floating_clip_arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 32px;
+  padding: 6px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--SmartThemeBorderColor);
+  background-color: var(--SmartThemeBlurTintColor);
+  color: var(--SmartThemeQuoteColor);
+  box-shadow: 0 2px 8px var(--SmartThemeShadowColor), 0 0 0 1px var(--SmartThemeBorderColor);
+  cursor: pointer;
+  user-select: none;
+  line-height: 1;
+  opacity: 0.7;
+  transition: opacity var(--animation-duration-2x) ease-in-out;
+}
+.stmb_floating_clip_arrow:hover {
+  opacity: 1;
+}
+.stmb_floating_clip_arrow:active {
+  transform: translateY(1px);
+}

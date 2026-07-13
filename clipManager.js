@@ -837,7 +837,65 @@ function scheduleFloatingClipUpdate() {
     floatingClipUpdateTimer = setTimeout(updateFloatingClipButton, 60);
 }
 
+// Механик машин: ближайшее .mes-сообщение выше/ниже данного.
+function stmbSiblingMes(mes, dir) {
+    let n = mes ? (dir === 'prev' ? mes.previousElementSibling : mes.nextElementSibling) : null;
+    while (n && !n.classList.contains('mes')) {
+        n = dir === 'prev' ? n.previousElementSibling : n.nextElementSibling;
+    }
+    return n;
+}
+
+// Механик машин: расширить текущее выделение на соседнее сообщение.
+//   dir === 'prev' — добавить предыдущее сообщение (◄), 'next' — следующее (►).
+function stmbExtendSelectionByMessage(dir) {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    const mesOf = (node) => {
+        const el = node && node.nodeType === Node.ELEMENT_NODE ? node : (node ? node.parentElement : null);
+        return el ? el.closest('.mes') : null;
+    };
+    const textOf = (mes) => (mes ? mes.querySelector('.mes_text') : null);
+
+    if (dir === 'prev') {
+        const prevText = textOf(stmbSiblingMes(mesOf(range.startContainer), 'prev'));
+        if (prevText) range.setStart(prevText, 0);
+    } else {
+        const nextText = textOf(stmbSiblingMes(mesOf(range.endContainer), 'next'));
+        if (nextText) range.setEnd(nextText, nextText.childNodes.length);
+    }
+    sel.removeAllRanges();
+    sel.addRange(range);
+    scheduleFloatingClipUpdate(); // переставить кнопку под новое выделение
+}
+
+// Механик машин: кнопка-стрелка рядом с ножницами.
+function stmbCreateFloatingArrow(dir) {
+    const arrow = document.createElement('div');
+    const icon = dir === 'prev' ? 'fa-chevron-left' : 'fa-chevron-right';
+    arrow.classList.add('stmb_floating_clip_arrow', 'fa-solid', icon, 'interactable');
+    arrow.title = dir === 'prev'
+        ? 'Добавить предыдущее сообщение к выделению'
+        : 'Добавить следующее сообщение к выделению';
+    arrow.setAttribute('tabindex', '0');
+    arrow.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+    });
+    arrow.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        stmbExtendSelectionByMessage(dir);
+    });
+    return arrow;
+}
+
 function createFloatingClipButton() {
+    // Механик машин: контейнер [◄] [✂] [►] — позиционируется как единое целое.
+    const wrap = document.createElement('div');
+    wrap.classList.add('stmb_floating_clip_wrap');
+
     const button = document.createElement('div');
     button.classList.add('stmb_floating_clip_button', 'fa-solid', 'fa-scissors', 'interactable');
     button.title = tr('STMemoryBooks_Clip_ButtonTitle', 'Clip highlighted text to Memory Book');
@@ -857,8 +915,10 @@ function createFloatingClipButton() {
         }
         await openClipModalFromSelection({ selectedText: state.selectedText, source: 'floating' });
     });
-    document.body.appendChild(button);
-    return button;
+
+    wrap.append(stmbCreateFloatingArrow('prev'), button, stmbCreateFloatingArrow('next'));
+    document.body.appendChild(wrap);
+    return wrap; // остальной код позиционирует/удаляет этот контейнер
 }
 
 function updateFloatingClipButton() {
