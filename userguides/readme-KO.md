@@ -1,0 +1,813 @@
+# 📕 Memory Books (SillyTavern 확장 기능)
+
+자동화되고 구조적이며 신뢰할 수 있는 기억(Memory) 생성을 위한 차세대 SillyTavern 확장 기능입니다. 채팅 안의 장면(Scene)을 표시하고, AI로 JSON 기반 요약을 생성한 뒤 로어북(Lorebook) 항목으로 저장합니다. 그룹 채팅, 고급 프로필 관리, 사이드 프롬프트/트래커, 다단계 메모리 통합을 지원합니다.
+
+### ❓ 용어 설명
+- Scene (장면) → Memory (기억)  
+- One saved fact (저장한 단일 사실) → Clip (클립)  
+- Ongoing tracker (계속 갱신되는 트래커) → Side Prompt (사이드 프롬프트)  
+- Many Memories (여러 기억) → Summary / Consolidation (요약 / 통합)  
+- One long entry (길어진 단일 항목) → Compaction (압축)
+
+### 클립 vs 사이드 프롬프트
+
+<details>
+<summary><strong>클립 vs 사이드 프롬프트</strong></summary>
+
+| **클립** | **사이드 프롬프트** |
+|---|---|
+| 선택한 채팅 텍스트를 메모리 북 항목에 저장합니다. | AI에게 채팅을 검토하게 하고 트래커 항목을 업데이트합니다. |
+| 하나의 명확한 사실, 대사, 약속, 선호, 아이템, 메모에 적합합니다. | 시간이 지나며 바뀌는 정보에 적합합니다. |
+| 생각 방식: “이 메모를 고정한다.” | 생각 방식: “이 섹션을 계속 최신 상태로 유지한다.” |
+
+</details>
+
+자세한 설명은 [사용자 가이드](USER_GUIDE-KO.md#️-클립-vs-사이드-프롬프트)를 참고하세요.
+
+### 압축 vs 통합
+
+<details>
+<summary><strong>압축 vs 통합</strong></summary>
+
+| **압축** | **통합** |
+|---|---|
+| STMB가 관리하는 기존 항목 하나를 짧게 줄입니다. | 여러 기억이나 요약을 더 높은 단계의 요약 하나로 합칩니다. |
+| Clip, Side Prompt, Memory 항목이 유용하지만 너무 길어졌을 때 사용합니다. | 여러 기억을 Arc, Chapter, Book 같은 더 큰 요약으로 묶을 준비가 되었을 때 사용합니다. |
+| 생각 방식: “이 항목 하나를 다듬는다.” | 생각 방식: “이 기억들을 묶어 요약으로 올린다.” |
+
+</details>
+
+자세한 설명은 [사용자 가이드](USER_GUIDE-KO.md#-압축-vs-통합)를 참고하세요.
+
+## ❗ 필독사항!
+
+여기서부터 시작하세요:
+* ⚠️‼️ 설치 관련 주의사항은 [사전 요구 사항](#-사전-요구-사항-prerequisites)을 읽어주세요. 특히 Text Completion API를 사용하는 경우 중요합니다.
+* 📽️ [빠른 시작 영상](https://youtu.be/mG2eRH_EhHs) - 영어 전용입니다. 죄송합니다. 제가 가장 능숙한 언어가 영어입니다.
+* ❓ [자주 묻는 질문](#faq)
+* 🛠️ [문제 해결](#troubleshooting)
+
+기타 링크:
+* 📘 [사용자 가이드 (한국어)](USER_GUIDE-KO.md)
+* 📋 [버전 기록 & 변경 로그](../changelog.md)
+* 💡 [📕 Memory Books와 📚 Lorebook Ordering 함께 사용하기](https://github.com/aikohanasaki/SillyTavern-LorebookOrdering/blob/main/guides/STMB%20and%20STLO%20-%20Korean.md)
+
+> 참고: 다양한 언어를 지원합니다. 목록은 [`/locales`](../locales) 폴더를 참조하세요. 국제/현지화된 Readme 및 사용자 가이드는 [`/userguides`](./) 폴더에서 찾을 수 있습니다.
+> 로어북 변환기 및 사이드 프롬프트 템플릿 라이브러리는 [`/resources`](../resources) 폴더에 있습니다.
+
+## 📑 목차
+
+- [사전 요구 사항](#-사전-요구-사항-prerequisites)
+  - [📕 ST Memory Books 사용을 위한 KoboldCpp 팁](#-st-memory-books-사용을-위한-koboldcpp-팁)
+  - [📕 ST Memory Books 사용을 위한 Llama.cpp 팁](#-st-memory-books-사용을-위한-llamacpp-팁)
+- [권장 글로벌 월드 인포/로어북 활성화 설정](#-권장-글로벌-월드-인포로어북-활성화-설정)
+- [시작하기](#-시작하기)
+  - [1. 설치 및 로드](#1-설치-및-로드)
+  - [2. 장면(Scene) 표시](#2-장면scene-표시)
+  - [3. 기억(Memory) 생성](#3-기억memory-생성)
+- [기억 유형: 장면(Scene) vs 요약(Summary)](#-기억-유형-장면scene-vs-요약summary)
+  - [장면 기억 (Scene Memories) - 기본값](#-장면-기억-scene-memories---기본값)
+  - [요약 통합 (Summary Consolidation)](#-요약-통합-summary-consolidation)
+- [기억 생성](#-기억-생성-memory-generation)
+  - [JSON 전용 출력](#json-전용-출력)
+  - [내장 프리셋](#내장-프리셋-built-in-presets)
+  - [사용자 지정 프롬프트](#사용자-지정-프롬프트)
+- [로어북 통합](#-로어북-통합)
+- [메모리 북에 클립](#️-메모리-북에-클립)
+- [주제별 클립](#-주제별-클립)
+- [슬래시 커맨드](#-슬래시-커맨드)
+- [그룹 채팅 지원](#-그룹-채팅-지원)
+- [작동 모드](#-작동-모드)
+  - [자동 모드 (기본값)](#자동-모드-기본값)
+  - [로어북 자동 생성 모드](#로어북-자동-생성-모드)
+  - [수동 로어북 모드](#수동-로어북-모드)
+- [트래커 & 사이드 프롬프트](#-트래커--사이드-프롬프트)
+- [압축](#-압축)
+- [고급 사용자 지정을 위한 Regex(정규표현식) 통합](#-고급-사용자-지정을-위한-regex정규표현식-통합)
+- [프로필 관리](#-프로필-관리)
+- [설정 및 구성](#-설정-및-구성)
+  - [글로벌 설정](#글로벌-설정)
+  - [프로필 필드](#프로필-필드)
+- [제목 서식](#-제목-서식-title-formatting)
+- [문맥 기억](#-문맥-기억-context-memories)
+- [선택 사항인 작업 대기열](#optional-job-queue-chat-top-bar-required)
+- [시각적 피드백 & 접근성](#-시각적-피드백--접근성)
+- [FAQ](#faq)
+  - [기억을 위한 별도의 로어북을 만들어야 하나요, 아니면 다른 용도로 사용 중인 로어북을 같이 써도 되나요?](#기억을-위한-별도의-로어북을-만들어야-하나요-아니면-다른-용도로-사용-중인-로어북을-같이-써도-되나요)
+  - [벡터(Vectors)를 실행해야 하나요?](#벡터vectors를-실행해야-하나요)
+  - [Memory Books가 유일한 로어북인 경우 '재귀까지 지연'을 사용해야 하나요?](#memory-books가-유일한-로어북인-경우-재귀까지-지연을-사용해야-하나요)
+  - [AI가 제 항목을 보지 못하는 이유는 무엇인가요?](#ai가-제-항목을-보지-못하는-이유는-무엇인가요)
+- [문제 해결](#문제-해결-troubleshooting)
+- [Lorebook Ordering (STLO)으로 파워업하기](#-lorebook-ordering-stlo으로-파워업하기)
+- [문자 정책](#-문자-정책-character-policy-v451)
+- [개발자용](#-개발자용)
+  - [확장 기능 빌드](#확장-기능-빌드)
+  - [Git Hooks](#git-hooks)
+
+---
+
+## 📋 사전 요구 사항 (Prerequisites)
+
+- **SillyTavern:** 1.14.0+ (최신 버전 권장)
+- **선택 사항인 작업 대기열:** STMB는 작업 대기열 없이도 작동합니다. 대기열 기능을 사용하려면 채팅 창 상단에 바를 추가하는 SillyTavern 공식 확장 **Chat Top Bar** / **Chat Top Info Bar**를 설치하고 활성화하세요. STMB는 이 상단 바를 사용해 **메모리 북 작업** 버튼과 드로어를 표시합니다.
+- **채팅 완성(Chat Completion) 지원:** OpenAI, Claude, Anthropic, OpenRouter 또는 기타 채팅 완성 API를 완벽하게 지원합니다.
+- **텍스트 완성(Text Completion) 지원:** 텍스트 완성 API(Kobold, TextGen 등)는 Chat Completion(OpenAI 호환) API 엔드포인트를 통해 연결된 경우 지원됩니다. 아래의 KoboldCpp 팁에 따라 Chat Completion API 연결을 설정하는 것을 권장합니다. Ollama 또는 다른 소프트웨어를 사용하는 경우 필요에 맞게 변경하세요. 그 후 STMB 프로필을 설정하고 `Custom`(권장) 또는 전체 수동 구성을 사용하세요. 전체 수동 구성은 `Custom`이 실패하거나 사용자 지정 연결이 둘 이상인 경우에만 사용하세요.
+**참고:** Text Completion을 사용하는 경우 반드시 Chat Completion 프리셋이 있어야 합니다!
+
+### 📕 ST Memory Books 사용을 위한 KoboldCpp 팁
+
+ST에서 다음과 같이 설정하세요. STMB가 작동하는 것을 확인한 뒤에는 Text Completion으로 다시 변경할 수 있습니다.
+
+- Chat Completion API
+- Custom chat completion source
+- 엔드포인트: `http://localhost:5001/v1` (`127.0.0.1:5000/v1`도 사용 가능)
+- `custom API key`에는 아무 값이나 입력하세요. 실제 값은 상관없지만 ST에서 요구합니다.
+- 모델 ID는 반드시 `koboldcpp/modelname` 형식이어야 합니다. 모델 이름에 `.gguf`를 넣지 마세요.
+- Chat Completion 프리셋을 다운로드하여 가져오세요. 아무 프리셋이나 괜찮습니다. Chat Completion 프리셋이 없어서 발생하는 `not supported` 오류를 피하기 위한 것입니다.
+- Chat Completion 프리셋의 최대 응답 길이를 최소 2048 이상으로 변경하세요. 4096을 권장합니다. 너무 작으면 응답이 잘릴 위험이 있습니다.
+
+### 📕 ST Memory Books 사용을 위한 Llama.cpp 팁
+
+Kobold와 마찬가지로, ST에서 _Chat Completion API_로 설정하세요. STMB가 작동하는 것을 확인한 뒤에는 다시 변경할 수 있습니다.
+
+- Chat Completion API를 위한 새 연결 프로필 생성
+- Completion Source: `Custom (Open-AI Compatible)`
+- Endpoint URL: Docker로 ST를 실행하는 경우 `http://host.docker.internal:8080/v1`, 그 외에는 `http://localhost:8080/v1`
+- Custom API key: 아무 값이나 입력하세요. ST에서 요구합니다.
+- Model ID: `llama2-7b-chat.gguf` 또는 사용 중인 모델명. llama.cpp에서 모델을 하나만 실행 중이라면 큰 문제는 없습니다.
+- Prompt post-processing: none
+
+Llama.cpp를 시작할 때는 편의를 위해 쉘 스크립트나 bat 파일에 다음과 비슷한 내용을 넣는 것을 권장합니다.
+
+```sh
+llama-server -m <model-path> -c <context-size> --port 8080
+```
+
+## 💡 권장 글로벌 월드 인포/로어북 활성화 설정
+
+- **Match Whole Words (전체 단어 일치):** 체크 해제(false)
+- **Scan Depth (스캔 깊이):** 높을수록 좋습니다. 저는 8로 설정합니다.
+- **Max Recursion Steps (최대 재귀 단계):** 2. 일반적인 권장 사항이며 필수는 아닙니다.
+- **Context % (컨텍스트 비율):** 80%. 100,000 토큰 컨텍스트 창 기준이며, 채팅 기록이나 봇이 지나치게 무겁지 않다는 전제입니다.
+- 추가 참고: 기억 로어북이 유일한 로어북이라면, STMB 프로필에서 `Delay until recursion`을 비활성화하세요. 그렇지 않으면 기억이 트리거되지 않을 수 있습니다.
+
+---
+
+## 🚀 시작하기
+
+### 1. **설치 및 로드**
+
+![이 버튼들이 표시될 때까지 기다리기](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/startup.png)
+
+
+- SillyTavern을 로드하고 캐릭터나 그룹 채팅을 선택합니다.
+- 채팅 메시지에 갈매기형 화살표 버튼(► ◄)이 나타날 때까지 기다립니다. 최대 10초 정도 걸릴 수 있습니다.
+
+
+### 2. **장면(Scene) 표시**
+
+![클릭된 시작 버튼](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/button-start.png)
+
+![장면 중간 버튼](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/button-middle.png)
+
+![클릭된 끝 버튼](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/button-end.png)
+
+
+- 장면의 첫 번째 메시지에서 ►를 클릭합니다.
+- 마지막 메시지에서 ◄를 클릭합니다.
+
+아래는 갈매기형 화살표 버튼을 클릭했을 때의 예시입니다. 사용하는 CSS 테마에 따라 색상은 다를 수 있습니다.
+
+
+### 3. **기억(Memory) 생성**
+
+- 확장 기능 메뉴(입력창 왼쪽의 마술봉 🪄)를 열고 `Memory Books`를 클릭하거나 `/creatememory` 슬래시 커맨드를 사용합니다.
+- 메시지가 표시되면 설정(프로필, 컨텍스트, API/모델)을 확인합니다.
+- AI 생성 및 자동 로어북 항목 추가가 완료될 때까지 기다립니다.
+
+---
+
+## 🧩 기억 유형: 장면(Scene) vs 요약(Summary)
+
+📕 Memory Books는 **장면 기억**과 **다단계 요약 통합**을 지원합니다. 두 기능은 서로 다른 종류의 연속성을 위해 설계되었습니다.
+
+### 🎬 장면 기억 (Scene Memories) - 기본값
+
+장면 기억은 특정 메시지 범위에서 **무슨 일이 일어났는지**를 포착합니다.
+
+- 명시적인 장면 선택(► ◄) 기반
+- 순간순간의 회상에 적합
+- 대화, 행동, 즉각적인 결과 보존
+- 자주 사용하는 것이 가장 좋음
+
+이것이 표준이며 가장 일반적으로 사용되는 기억 유형입니다.
+
+---
+
+### 🌈 요약 통합 (Summary Consolidation)
+
+![통합 버튼](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/button-consolidate.png)
+
+
+요약 통합은 여러 기억이나 요약에 걸쳐 **시간이 지나며 무엇이 변했는지**를 포착합니다.
+
+하나의 장면을 요약하는 대신, 통합 요약은 다음 사항에 중점을 둡니다.
+
+- 캐릭터 발전 및 관계 변화
+- 장기적인 목표, 긴장감, 해결
+- 감정의 궤적 및 서사적 방향
+- 안정적으로 유지되어야 하는 지속적인 상태 변화
+
+첫 번째 통합 단계는 장면 기억에서 만들어지는 **Arc**입니다. 더 긴 이야기를 위해 더 높은 단계도 지원합니다.
+
+- Arc
+- Chapter
+- Book
+- Legend
+- Series
+- Epic
+
+> 💡 이것을 장면 로그가 아니라 *요약 회고*로 생각하세요.
+
+#### 요약 통합 사용 시기
+
+- 주요 관계 변화 후
+- 스토리 챕터나 아크가 끝날 때
+- 동기, 신뢰, 권력 역학 관계가 바뀔 때
+- 스토리의 새로운 국면을 시작하기 전
+
+#### 작동 방식
+
+- 통합 요약은 직접 채팅 본문이 아니라 기존 STMB 기억/요약에서 생성됩니다.
+- **기억 통합하기(Consolidate Memories)** 도구에서 대상 요약 단계와 원본 항목을 선택할 수 있습니다.
+- STMB는 선택한 요약 단계를 감시하고, 해당 단계가 저장된 최소 적격 항목 수에 도달하면 yes/later 확인을 표시할 수 있습니다.
+- 원할 경우 통합 후 원본 항목을 비활성화하여 상위 요약이 역할을 넘겨받게 할 수 있습니다.
+- AI 요약 응답에 실패하면 UI에서 검토 및 수정한 뒤 커밋을 다시 시도할 수 있습니다.
+
+이로 인해 얻는 이점은 다음과 같습니다.
+
+- 토큰 사용량 감소
+- 긴 채팅 전반의 서사 연속성 향상
+
+---
+
+## 📝 기억 생성 (Memory Generation)
+
+### **JSON 전용 출력**
+
+모든 프롬프트와 프리셋은 AI가 **유효한 JSON만** 반환하도록 지시해야 합니다. 예:
+
+```json
+{
+  "title": "짧은 장면 제목",
+  "content": "장면에 대한 상세 요약...",
+  "keywords": ["키워드1", "키워드2"]
+}
+```
+
+**응답에는 다른 텍스트가 포함되어서는 안 됩니다.**
+
+### **내장 프리셋 (Built-in Presets)**
+
+1. **Summary:** 상세한 비트 단위 요약.
+2. **Summarize:** 타임라인, 비트, 상호 작용, 결과를 위한 마크다운 헤더 사용.
+3. **Synopsis:** 포괄적이고 구조화된 마크다운.
+4. **Sum Up:** 타임라인이 포함된 간결한 비트 요약.
+5. **Minimal:** 1-2문장 요약.
+6. **Northgate:** 창작용 문학적 요약 스타일.
+7. **Aelemar:** 플롯 포인트와 캐릭터 기억에 집중.
+8. **Comprehensive:** 키워드 추출이 개선된 synopsis 스타일 요약.
+
+### **사용자 지정 프롬프트**
+
+- 직접 만들 수 있지만, 위와 같이 반드시 **유효한 JSON을 반환**해야 합니다.
+
+---
+
+## 📚 로어북 통합
+
+- **자동 항목 생성:** 새로운 기억은 모든 메타데이터가 포함된 항목으로 저장됩니다.
+- **플래그 기반 감지:** `stmemorybooks` 플래그가 있는 항목만 기억으로 인식됩니다.
+- **자동 번호 매기기:** 순차적이며 0으로 채워진 번호 매기기를 지원합니다. 여러 형식을 지원합니다: `[000]`, `(000)`, `{000}`, `#000`.
+- **수동/자동 순서:** 프로필별 삽입 순서 설정.
+- **에디터 새로고침:** 기억 추가 후 로어북 에디터를 자동으로 새로 고치는 옵션.
+
+> **기존 기억은 변환해야 합니다!**
+> [Lorebook Converter(로어북 변환기)](../resources/lorebookconverter.html)를 사용하여 `stmemorybooks` 플래그와 필수 필드를 추가하세요.
+
+---
+
+## ✂️ 메모리 북에 클립
+
+![텍스트 클립](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/clip.png)
+
+
+메모리 북에 클립은 빠른 “이것을 기억해줘” 메모를 위한 기능입니다. 채팅에서 중요한 텍스트를 선택하고, 플로팅 가위 버튼을 클릭하면 로어북 편집기를 먼저 열지 않고도 선택한 텍스트를 메모리 북의 글머리표로 저장할 수 있습니다.
+
+시간이 지나며 계속 업데이트되는 트래커가 필요하다면 대신 사이드 프롬프트를 사용하세요. 짧게 말하면: **클립 = 저장한 단일 사실, 사이드 프롬프트 = 계속 갱신되는 트래커.**
+
+#### 작동 방식
+
+- 기억하고 싶은 정확한 텍스트를 선택합니다.
+- 플로팅 가위 버튼을 클릭합니다. 이 버튼은 Memory Books 팝업에서 켜거나 끌 수 있습니다.
+- 기존 클립 항목을 선택하거나 새 항목을 만듭니다.
+- 저장하기 전에 현재 항목과 업데이트된 미리보기를 검토합니다.
+- 필요하면 항목/섹션 이름을 변경합니다.
+
+클립 항목은 항목 제목 끝에 `[STMB Clip]`이 붙은 일반 로어북 항목입니다. 예:
+
+```txt
+Seraphina Healed Me [STMB Clip]
+```
+
+항목 안에 보이는 섹션은 `[STMB Clip]`을 제외한 제목을 사용합니다.
+
+```md
+=== Seraphina Healed Me ===
+
+- Seraphina healed my wounds with magic.
+- Seraphina, guardian of this forest
+
+=== END Seraphina Healed Me ===
+```
+
+#### 팁
+
+- 클립 항목 하나에는 섹션 하나가 들어갑니다. `Things {{user}} Likes`, `Pet Names`, `Food Preferences`처럼 초점이 분명한 제목을 사용하면 키워드를 구체적으로 유지하기 쉽습니다.
+- 새 클립 항목은 항상 활성 또는 키워드 활성 항목으로 만들 수 있습니다. 항상 활성은 가장 쉽고, 항목이 특정 상황에서만 필요하다면 키워드가 더 적합합니다.
+- 기존 항목은 제목 끝에 `[STMB Clip]`을 추가하면 클립 항목으로 바꿀 수 있습니다.
+- 긴 클립 항목은 검토하거나 압축하라는 알림을 표시할 수 있습니다. 압축은 Clip, Side Prompt, STMB 메모리 항목을 원본과 교체하기 전에 더 토큰 효율적으로 만드는 데 도움이 됩니다.
+- 클립 항목은 출처 표기를 추가하지 않습니다. 저장되는 것은 사용자가 클립하기로 선택한 텍스트뿐입니다.
+
+---
+
+## 🔎 주제별 클립
+
+주제별 클립은 하나의 주제에 대한 집중된 클립 형식의 메모리 항목을 만들거나 업데이트합니다.
+
+이미 STMB 메모리를 저장해 두었지만, 그 메모리에서 관련 내용을 모아 하나의 깔끔한 “이 주제에 대해” 항목을 만들고 싶을 때 사용합니다. 예:
+
+- `Seraphina에 대해`
+- `{{user}}의 마법에 대해`
+- `Alex와 Mira의 관계에 대해`
+- `Black Harbor 조사에 대해`
+
+주제별 클립은 일반적인 메모리 북 클립과 다릅니다. 일반 클립은 선택한 채팅 텍스트를 직접 저장합니다. 주제별 클립은 기존 STMB 메모리 항목을 읽고, AI에게 한 주제에 대한 세부 정보를 추출하게 한 다음, 저장 전에 편집 가능한 초안을 제공합니다.
+
+#### 작동 방식
+
+1. Memory Books를 엽니다.
+2. **🔎 주제별 클립**을 클릭합니다.
+3. **원본 메모리 북**을 선택합니다.
+4. **주제**를 입력합니다.
+5. 활성화 **키워드**를 입력하거나, 비워 두어 주제를 사용합니다.
+6. 새 주제별 클립을 만들지, 기존 `[STMB Clip]` 항목을 업데이트할지 선택합니다.
+7. **생성 프로필**을 선택합니다.
+8. **초안 생성**을 클릭합니다.
+9. 초안을 검토하고 편집합니다.
+10. 만족할 때만 **주제별 클립 저장**을 클릭합니다.
+
+주제별 클립은 `[STMB Clip]`으로 표시된 일반 클립 항목으로 저장됩니다. 새 항목은 다음과 같은 제목을 사용합니다:
+
+```txt
+Seraphina에 대해 [STMB Clip]
+```
+
+#### 기존 주제별 클립 업데이트
+
+기존 주제별 클립을 업데이트하면, STMB는 마지막으로 성공한 실행에서 사용한 원본 메모리를 기억합니다. 다음 업데이트에서는 보통 새롭거나 변경된 원본 메모리만 사용합니다.
+
+해당되는 모든 메모리에서 전체 항목을 다시 만들고 싶다면, 초안을 생성하기 전에 **모든 원본 메모리에서 다시 빌드**를 켭니다.
+
+#### 참고
+
+- 주제별 클립은 확인된 STMB 메모리 항목만 원본 자료로 사용합니다.
+- 클립 항목과 사이드 프롬프트 항목은 원본 메모리로 사용되지 않습니다.
+- 업데이트 대상은 기존 `[STMB Clip]` 항목입니다.
+- AI 초안은 저장 전에 항상 검토하고 편집할 수 있습니다.
+- **주제별 클립 저장**을 클릭하기 전까지 STMB는 생성된 초안을 저장하지 않습니다.
+- 요청이 큰 경우, STMB가 실행 전에 토큰 경고를 표시할 수 있습니다.
+
+---
+
+## 🆕 슬래시 커맨드
+
+- `/creatememory` - 표시한 장면에서 기억을 생성합니다.
+- `/scenememory X-Y` - 장면 범위를 설정하고 기억을 생성합니다. 예: `/scenememory 10-15`.
+- `/nextmemory` - 마지막 기억 이후부터 현재 메시지까지로 기억을 생성합니다.
+- `/stmb-catchup interval:x start:y end:y` - 기존의 긴 채팅에서 선택한 메시지 범위를 interval 크기의 구간으로 나누어 캐치업용 메모리를 생성합니다.
+- `/sideprompt "Name" {{macro}}="value" [X-Y]` - 사이드 프롬프트를 실행합니다. `{{macro}}`는 선택 사항입니다.
+- `/sideprompt-set "Set Name" [X-Y]` - 저장된 Side Prompt Set을 실행합니다.
+- `/sideprompt-macroset "Set Name" {{macro}}="value" [X-Y]` - Side Prompt Set을 실행하고 재사용 가능한 매크로 값을 제공합니다.
+- `/sideprompt-on "Name" | all` - 이름으로 지정한 Side Prompt 또는 모든 Side Prompt를 활성화합니다.
+- `/sideprompt-off "Name" | all` - 이름으로 지정한 Side Prompt 또는 모든 Side Prompt를 비활성화합니다.
+- `/stmb-highest` - 이 채팅에서 처리된 기억의 가장 높은 메시지 ID를 반환합니다.
+- `/stmb-set-highest <N|none>` - 이 채팅의 가장 높은 처리 메시지 ID를 수동으로 설정합니다.
+- `/stmb-stop` - 모든 위치에서 진행 중인 STMB 생성을 중지합니다. 비상 정지용입니다.
+
+### `/stmb-catchup`
+
+기존의 긴 채팅을 STMB 메모리로 변환할 때 `/stmb-catchup`을 사용합니다. 문법: `/stmb-catchup interval:x start:y end:y`
+
+예시: `/stmb-catchup interval:30 start:0 end:300`
+
+---
+
+## 👥 그룹 채팅 지원
+
+- 모든 기능이 그룹 채팅에서 작동합니다.
+- 장면 마커, 기억 생성, 로어북 통합은 활성 채팅 메타데이터에 저장됩니다.
+- 특별한 설정은 필요 없습니다. 그룹 채팅을 선택하고 평소처럼 사용하면 됩니다.
+
+---
+
+## 🧭 작동 모드
+
+### **자동 모드 (기본값)**
+
+![채팅 로어북 연결 예시](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/chatlorebook.png)
+
+
+- **작동 방식:** 현재 채팅에 바인딩된 로어북을 자동으로 사용합니다.
+- **추천 대상:** 단순함과 속도를 원하는 경우. 대부분의 사용자는 이 모드로 시작하는 것이 좋습니다.
+- **사용법:** 캐릭터 또는 그룹 채팅의 `Chat Lorebooks` 드롭다운에서 로어북이 선택되어 있는지 확인하세요.
+
+
+### **로어북 자동 생성 모드**
+
+- **작동 방식:** 로어북이 존재하지 않을 경우, 사용자 지정 명명 템플릿을 사용하여 새 로어북을 자동으로 생성하고 바인딩합니다.
+- **추천 대상:** 신규 사용자 및 빠른 설정. 원클릭 로어북 생성에 적합합니다.
+- **사용법:**
+  1. 확장 기능 설정에서 `Auto-create lorebook if none exists`를 활성화합니다.
+  2. 명명 템플릿을 구성합니다. 기본값: `LTM - {{char}} - {{chat}}`.
+  3. 바인딩된 로어북 없이 기억을 생성하면 자동으로 생성되어 바인딩됩니다.
+- **템플릿 플레이스홀더:** `{{char}}`(캐릭터 이름), `{{user}}`(사용자 이름), `{{chat}}`(채팅 ID)
+- **스마트 넘버링:** 중복된 이름이 존재할 경우 자동으로 번호(2, 3, 4...)를 추가합니다.
+- **참고:** 수동 로어북 모드와 동시에 사용할 수 없습니다.
+
+### **수동 로어북 모드**
+
+- **작동 방식:** 기본 채팅 바인딩 로어북을 무시하고, 채팅별로 기억을 저장할 다른 로어북을 선택할 수 있습니다.
+- **추천 대상:** 기억을 특정 별도 로어북으로 지정하고 싶은 고급 사용자.
+- **사용법:**
+  1. 확장 기능 설정에서 `Enable Manual Lorebook Mode`를 활성화합니다.
+  2. 채팅에서 처음 기억을 생성할 때 로어북을 선택하라는 메시지가 표시됩니다.
+  3. 이 선택은 해당 채팅에 저장되며, 지우거나 자동 모드로 전환할 때까지 유지됩니다.
+- **참고:** 로어북 자동 생성 모드와 동시에 사용할 수 없습니다.
+
+---
+
+### 🎡 트래커 & 사이드 프롬프트
+
+![트래커와 사이드 프롬프트 찾는 위치](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/sp.png)
+
+
+> 📘 Side Prompts에는 별도의 가이드가 있습니다: [Side Prompts Guide](side-prompts-ko.md). 세트, 매크로, 예시, 문제 해결은 이 문서를 참고하세요.
+> 🎡 정확한 클릭 경로가 필요하면 [Side Prompts 활성화 Scribe 안내](https://scribehow.com/viewer/How_to_Enable_Side_Prompts_in_Memory_Books__fif494uSSjCmxE2ZCmRGxQ)를 참조하세요.
+
+Side Prompts는 진행 중인 채팅 상태를 유지하기 위한 별도의 STMB 프롬프트 실행입니다. 일반 캐릭터 응답을 불필요하게 늘리지 않고 트래커와 보조 메모를 관리할 때 사용합니다. 예:
+
+- 💰 인벤토리 & 자원 ("사용자가 무엇을 가지고 있는가?")
+- ❤️ 관계 상태 ("X는 Y에 대해 어떻게 느끼는가?")
+- 📊 캐릭터 스탯 ("현재 체력, 기술, 평판")
+- 🎯 퀘스트 진행 ("어떤 목표가 활성화되었는가?")
+- 🌍 월드 상태 ("설정에서 무엇이 변경되었는가?")
+
+#### **접근:** Memory Books 설정에서 “🎡 Trackers & Side Prompts”를 클릭하세요.
+
+#### **기능:**
+- Side Prompts를 보기, 생성, 복제, 편집, 삭제, 내보내기, 가져오기할 수 있습니다.
+- Side Prompts를 수동으로 실행하거나, 기억 생성 후 실행하거나, Side Prompt Set의 일부로 실행할 수 있습니다.
+- `{{user}}`, `{{char}}` 같은 표준 SillyTavern 매크로를 사용할 수 있습니다.
+- 실행 시 값이 필요한 프롬프트에는 `{{npc name}}` 같은 런타임 매크로를 사용할 수 있습니다.
+- Side Prompt 출력을 기억 로어북의 별도 side-prompt 항목으로 저장할 수 있습니다.
+
+#### **사용 팁:**
+- 새 프롬프트를 만들 때는 내장 프롬프트를 복사해서 시작하세요.
+- Side Prompts는 JSON을 반환할 필요가 없습니다. 일반 텍스트나 Markdown도 괜찮습니다.
+- Side Prompts는 보통 갱신/덮어쓰기됩니다. 기억은 순차적으로 저장됩니다.
+- 수동 구문: `/sideprompt "Name" {{macro}}="value" [X-Y]`.
+- 채팅에 정렬된 트래커 묶음이 필요하면 Side Prompt Sets를 사용하세요.
+- 기억 생성 후 실행하도록 선택된 Side Prompt Set은 해당 채팅에서 개별적으로 활성화된 기억 생성 후 Side Prompts를 대체합니다.
+- 추가 Side Prompts 템플릿 라이브러리는 [JSON 파일](../resources/SidePromptTemplateLibrary.json)로 제공됩니다. 가져오기만 하면 사용할 수 있습니다.
+
+---
+
+## 🧹 압축
+
+![압축 메뉴를 여는 위치](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/compaction.png)
+
+
+압축(Compaction)은 STMB가 관리하는 로어북 항목을 더 토큰 효율적으로 다듬기 위한 검토 워크플로입니다. AI에게 기존 항목 하나를 다시 쓰게 한 뒤, 원본과 압축 초안을 나란히 보여줍니다. 사용자가 명시적으로 교체하기 전에는 아무것도 덮어쓰지 않습니다.
+
+Memory Books 메인 팝업에서 **📝 압축**을 눌러 열 수 있습니다. 긴 클립 항목도 클립 워크플로에서 **항목 압축** 버튼을 표시할 수 있습니다.
+
+#### 압축 가능한 항목
+
+압축 창은 선택한 메모리 북에서 다음 항목을 표시합니다:
+
+- `[STMB Clip]`으로 표시된 클립 항목
+- 사이드 프롬프트 항목
+- Memory Books가 표시한 STMB 메모리 항목
+
+STMB가 관리하지 않는 일반 로어북 항목은 표시되지 않습니다.
+
+#### 작동 방식
+
+1. Memory Books를 열고 **📝 압축**을 클릭합니다.
+2. **메모리 북**을 선택합니다. 현재 채팅에 유효한 메모리 북이 있으면 STMB가 자동으로 선택할 수 있습니다. 없으면 검색 가능한 드롭다운에서 직접 선택합니다.
+3. **압축 프로필**을 선택합니다. 이 프로필은 압축 요청에 사용할 AI 연결/모델을 정합니다.
+4. 필요하면 **압축 프롬프트 편집**을 눌러 AI에게 보낼 지시문을 수정합니다.
+5. 다시 쓰고 싶은 항목 옆의 **항목 압축**을 클릭합니다.
+6. **원본 내용**과 **압축 초안**을 비교합니다. STMB는 두 버전의 예상 토큰 수를 함께 보여줍니다.
+7. 필요하면 초안을 직접 수정한 뒤 **압축된 버전으로 바꾸기**, **압축 초안 복사**, 또는 **취소**를 선택합니다.
+
+STMB는 원본을 자동으로 교체하지 않습니다. 로어북 항목은 **압축된 버전으로 바꾸기**를 클릭했을 때만 변경됩니다.
+
+#### 압축 프롬프트
+
+압축 프롬프트는 편집할 수 있습니다. 기본 프롬프트는 중요한 사실, 이름, 대명사, 매크로, 래퍼 헤딩, 종료 마커를 보존하면서 반복과 낮은 가치의 문장을 줄이도록 지시합니다.
+
+지원되는 프롬프트 플레이스홀더:
+
+- `{{ENTRY_CONTENT}}` — 현재 로어북 항목 내용입니다. 이 플레이스홀더는 필수입니다.
+- `{{ENTRY_KIND}}` — 항목 유형입니다. 예: Clip, SidePrompt, Memory.
+- `{{ENTRY_TITLE}}` — 로어북 항목 제목입니다.
+
+내장 압축 프롬프트로 되돌리고 싶으면 프롬프트 편집기에서 **기본값으로 재설정**을 사용하세요.
+
+#### 사용하기 좋은 경우
+
+- 긴 클립 항목
+- 반복된 노트가 쌓인 사이드 프롬프트 트래커 항목
+- 유용하지만 장황한 STMB 메모리 항목
+- 항상 활성화되어 컨텍스트를 많이 쓰기 시작한 항목
+
+#### 적합하지 않은 경우
+
+- 새 사실 추가
+- 원본 채팅 요약
+- 새 메모리 생성
+- STMB가 관리하지 않는 일반 로어북 항목 다시 쓰기
+
+---
+
+### 🧠 고급 사용자 지정을 위한 Regex(정규표현식) 통합
+
+![regex 구성](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/regex.png)
+
+
+- **텍스트 처리에 대한 완전한 제어:** Memory Books는 SillyTavern의 **Regex** 확장 기능과 통합되어 두 단계에서 강력한 텍스트 변환을 적용할 수 있습니다.
+  1. **프롬프트 생성(Prompt Generation):** **User Input** 위치를 대상으로 하는 regex 스크립트를 만들어 AI에 보내는 프롬프트를 자동으로 수정합니다.
+  2. **응답 파싱(Response Parsing):** **AI Output** 위치를 대상으로 하여 저장 전에 AI의 원시 응답을 정리, 재포맷 또는 표준화합니다.
+- **다중 선택 지원:** 송신 및 수신 처리에 여러 스크립트를 선택할 수 있습니다.
+- **작동 방식:** STMB에서 `Use regex (advanced)`를 켜고 `📐 Configure regex…`를 클릭한 뒤, AI에 보내기 전과 응답을 파싱/저장하기 전에 실행할 스크립트를 선택합니다.
+- **중요:** Regex 선택은 STMB가 제어합니다. STMB에서 선택한 스크립트는 Regex 확장 기능 자체에서 현재 비활성화되어 있어도 실행됩니다.
+
+---
+
+## 👤 프로필 관리
+
+![프로필 관리](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/profiles.png)
+
+
+- **프로필:** 각 프로필에는 API, 모델, 온도(Temperature), 프롬프트/프리셋, 제목 서식, 로어북 설정이 포함됩니다.
+- **가져오기/내보내기:** 프로필을 JSON으로 공유할 수 있습니다.
+- **프로필 생성:** 고급 옵션 팝업을 사용하여 새 프로필을 저장합니다.
+- **프로필별 오버라이드:** 기억 생성 시 API/모델/온도를 일시적으로 전환하고, 이후 원래 설정으로 복원할 수 있습니다.
+- **내장 Provider/Profile:** STMB에는 필수 `Current SillyTavern Settings` 옵션이 포함되어 있으며, 현재 활성화된 SillyTavern 연결/설정을 직접 사용합니다.
+
+---
+
+## ⚙️ 설정 및 구성
+
+![기본 설정 패널 1](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/profile1.png)
+![기본 설정 패널 2](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/profile2.png)
+![기본 설정 패널 3](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/profile3.png)
+
+
+### **글로벌 설정**
+
+[Youtube 짧은 영상 개요](https://youtu.be/mG2eRH_EhHs)
+
+- **Manual Lorebook Mode:** 채팅별로 로어북을 선택하려면 활성화하세요.
+- **Auto-create lorebook if none exists:** ⭐ *v4.2.0 신규* - 명명 템플릿을 사용하여 로어북을 자동 생성 및 바인딩합니다.
+- **Lorebook Name Template:** ⭐ *v4.2.0 신규* - `{{char}}`, `{{user}}`, `{{chat}}` 플레이스홀더로 자동 생성되는 로어북 이름을 사용자 지정합니다.
+- **Allow Scene Overlap:** 중복되는 기억 범위를 허용하거나 방지합니다.
+- **Always Use Default Profile:** 확인 팝업을 건너뜁니다.
+- **Show memory previews:** 로어북에 추가하기 전에 기억을 검토하고 편집할 수 있는 미리보기 팝업을 활성화합니다.
+- **Show Notifications:** 토스트 메시지를 토글합니다.
+- **Refresh Editor:** 기억 생성 후 로어북 에디터를 자동 새로고침합니다.
+- **Max Response Tokens:** 기억 요약의 최대 생성 길이를 설정합니다.
+- **Token Warning Threshold:** 큰 장면에 대한 경고 수준을 설정합니다.
+- **Default Previous Memories:** 문맥(Context)으로 포함할 이전 기억의 수입니다. 0-7.
+- **Auto-create memory summaries:** 간격에 따라 기억 생성을 자동으로 활성화합니다.
+- **Auto-Summary Interval:** 기억 요약을 자동 생성할 메시지 수.
+- **Auto-Summary Buffer:** 자동 요약을 지정 메시지 수만큼 지연합니다.
+- **Prompt for consolidation when a tier is ready:** 선택한 요약 단계에 충분한 적격 원본 항목이 있으면 yes/later 확인을 표시합니다.
+- **Auto-Consolidation Tiers:** 준비되었을 때 확인 프롬프트를 트리거할 요약 단계를 하나 이상 선택합니다. 현재 Arc부터 Series까지 지원합니다.
+- **Unhide hidden messages before memory generation:** 기억 생성 전에 `/unhide X-Y`를 실행할 수 있습니다.
+- **Auto-hide messages after adding memory:** 처리된 모든 메시지 또는 가장 최근 기억 범위만 자동으로 숨길 수 있습니다.
+- **Use regex (advanced):** STMB의 송신/수신 처리용 regex 선택 팝업을 활성화합니다.
+- **Memory Title Format:** 선택하거나 사용자 지정합니다. 아래를 참조하세요.
+
+
+### **프로필 필드**
+
+![프로필 구성](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/Profile.png)
+
+
+- **Name:** 표시 이름.
+- **API/Provider:** `Current SillyTavern Settings`, openai, claude, custom, full manual 및 기타 지원 Provider.
+- **Model:** 모델명. 예: gpt-4, claude-3-opus.
+- **Temperature:** 0.0-2.0.
+- **Prompt or Preset:** 사용자 지정 또는 내장.
+- **Title Format:** 프로필별 템플릿.
+- **Activation Mode:** Vectorized(벡터화), Constant(상시), Normal(일반).
+- **Position:** ↑Char, ↓Char, ↑EM, ↓EM, ↑AN, ↓AN, Outlet 및 필드 이름.
+- **Order Mode:** 자동/수동.
+- **Recursion:** 재귀 방지/재귀까지 지연.
+
+---
+
+## 🏷️ 제목 서식 (Title Formatting)
+
+![제목 형식](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/titleformat.png)
+![제목 형식 목록](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/titleformats.png)
+
+
+강력한 템플릿 시스템을 사용하여 로어북 항목의 제목을 사용자 지정하세요.
+
+- **플레이스홀더:**
+  - `{{title}}` - AI가 생성한 제목. 예: "운명적인 만남".
+  - `{{scene}}` - 메시지 범위. 예: "Scene 15-23".
+  - `{{char}}` - 캐릭터 이름.
+  - `{{user}}` - 사용자 이름.
+  - `{{messages}}` - 장면 내 메시지 수.
+  - `{{profile}}` - 생성에 사용된 프로필 이름.
+  - 다양한 형식의 현재 날짜/시간 플레이스홀더. 예: 날짜 `August 13, 2025`, 시간 `11:08 PM`.
+- **자동 번호 매기기:** `[0]`, `[00]`, `(0)`, `{0}`, `#0`을 사용할 수 있으며, `#[000]`, `([000])`, `{[000]}` 같은 감싸진 형태도 순차적이고 0으로 채워진 번호 매기기에 사용할 수 있습니다.
+- **사용자 지정 서식:** 자신만의 서식을 만들 수 있습니다. v4.5.1부터는 이모지, 한중일(CJK) 문자, 악센트 문자, 기호 등을 포함한 모든 출력 가능한 유니코드 문자가 제목에 허용됩니다. 유니코드 제어 문자만 차단됩니다.
+
+---
+
+## 🧵 문맥 기억 (Context Memories)
+
+![문맥을 포함한 기억 생성](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/context.png)
+
+
+- 더 나은 연속성을 위해 **최대 7개의 이전 기억을 문맥으로 포함**합니다.
+- **토큰 추정치**는 정확성을 위해 문맥 기억을 포함하여 계산됩니다.
+- **고급 옵션**을 사용하면 단일 기억 생성 실행에 대해 프롬프트/프로필 동작을 일시적으로 오버라이드할 수 있습니다.
+
+
+---
+
+<a id="optional-job-queue-chat-top-bar-required"></a>
+## 🧾 선택 사항인 작업 대기열 (Chat Top Bar 필요)
+
+![ST Memory Books 작업 대기열](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/queue.png)
+
+
+작업 대기열은 선택 사항이지만 강력한 기능입니다. Memory Books를 사용하는 데 반드시 필요하지는 않습니다.
+
+**Chat Top Bar** / **Chat Top Info Bar**를 설치하고 활성화하면, STMB가 채팅 상단 바에 **메모리 북 작업** 버튼을 추가합니다. 이 버튼은 활성, 완료, 실패, 취소 또는 검토 필요 상태의 Memory Books 작업을 볼 수 있는 대기열 드로어를 엽니다.
+
+특히 다음과 같은 경우 유용합니다.
+
+- 긴 장면에서 메모리를 만들 때
+- 통합을 실행할 때
+- 메모리 생성 후 Side Prompts를 실행할 때
+- 긴 채팅에서 진행 상황과 검토 처리를 더 명확하게 보고 싶을 때
+
+대기열은 작업 상태를 표시하고, 활성 작업을 취소하고, 실패한 작업을 다시 시도하고, 완료된 작업을 닫을 수 있습니다. 대기 중인 작업에 사용자 검토가 필요한 경우, STMB는 안전하지 않은 내용을 조용히 덮어쓰는 대신 해당 작업을 **검토 필요**로 표시할 수 있습니다.
+
+Chat Top Bar가 설치되어 있지 않거나 활성화되어 있지 않아도 STMB는 정상적으로 작동합니다. 다만 작업 대기열 UI는 사용할 수 없습니다.
+
+
+![Chat Top Bar 설치 방법](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/install.png)
+
+---
+## 🎨 시각적 피드백 & 접근성
+
+![모든 시각 상태를 보여주는 전체 장면 선택](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/example.png)
+
+
+- **버튼 상태:**
+  - 비활성, 활성, 유효한 선택, 장면 내부, 처리 중.
+
+
+- **접근성:**
+  - 키보드 탐색, 포커스 표시기, ARIA 속성, 동작 줄이기, 모바일 친화적.
+
+---
+
+# FAQ
+
+### 기억을 위한 별도의 로어북을 만들어야 하나요, 아니면 다른 용도로 사용 중인 로어북을 같이 써도 되나요?
+
+기억 로어북은 별도의 책으로 만드는 것을 권장합니다. 이렇게 하면 기억을 정리하기가 더 쉽습니다. 다른 항목들과 섞이지 않기 때문입니다. 예를 들어 그룹 채팅에 추가하거나, 다른 채팅에서 사용하거나, STLO를 사용할 때 개별 로어북 예산을 설정할 때 유용합니다.
+
+### 벡터(Vectors)를 실행해야 하나요?
+
+사용할 수는 있지만 필수는 아닙니다. 벡터 확장 기능을 사용하지 않아도(저도 사용하지 않습니다) 키워드를 통해 작동합니다. 이 과정은 자동화되어 있으므로 어떤 키워드를 사용할지 직접 고민할 필요가 없습니다.
+
+### Memory Books가 유일한 로어북인 경우 '재귀까지 지연'을 사용해야 하나요?
+
+아니요. 다른 월드 인포나 로어북이 없는 경우 `Delay until recursion`을 선택하면 첫 번째 루프가 트리거되지 않아 아무것도 활성화되지 않을 수 있습니다. Memory Books가 유일한 로어북인 경우, `Delay until recursion`을 비활성화하거나 최소 하나 이상의 추가 월드 인포/로어북을 구성하세요.
+
+### AI가 제 항목을 보지 못하는 이유는 무엇인가요?
+
+먼저 항목이 실제로 전송되고 있는지 확인해야 합니다. 저는 이 확인에 [WorldInfo-Info](https://github.com/aikohanasaki/SillyTavern-WorldInfoInfo)를 사용하는 것을 좋아합니다.
+
+항목이 트리거되고 AI에게 전송되고 있다면, OOC로 AI에게 직접 지적하는 편이 나을 수 있습니다. 예: `[OOC: WHY are you not using the information you were given? Specifically: (whatever it was)]` 😁
+
+---
+
+# 문제 해결 (Troubleshooting)
+
+![장면 중복 경고](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/overlap.png)
+![장면 중복 허용](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/overlap2.png)
+
+
+- **확장 기능 메뉴에서 Memory Books를 찾을 수 없습니다!**
+  설정은 확장 기능 메뉴(입력창 왼쪽의 마술봉 🪄)에 있습니다. `Memory Books`를 찾으세요.
+
+![STMB 설정 위치](https://github.com/aikohanasaki/imagehost/blob/main/STMemoryBooks/menu.png)
+
+
+- **사용 가능하거나 선택된 로어북이 없음:**
+  - 수동 모드에서는 메시지가 뜰 때 로어북을 선택하세요.
+  - 자동 모드에서는 채팅에 로어북을 바인딩하세요.
+  - 또는 `Auto-create lorebook if none exists`를 활성화하여 자동 생성하세요.
+
+- **Lorebook Validation Error:**
+  - 이전에 바인딩된 로어북을 삭제했을 가능성이 큽니다. 새 로어북을 바인딩하세요. 빈 로어북이어도 됩니다.
+
+- **선택된 장면이 없음:**
+  - 시작(►) 및 종료(◄) 지점을 모두 표시하세요.
+
+- **장면이 기존 기억과 겹침:**
+  - 다른 범위를 선택하거나 설정에서 `Allow Scene Overlap`을 활성화하세요.
+
+
+- **AI가 유효한 기억 생성에 실패함:**
+  - JSON 출력을 지원하는 모델을 사용하세요.
+  - 프롬프트와 모델 설정을 확인하세요.
+
+- **토큰 경고 임계값 초과:**
+  - 더 작은 장면을 사용하거나 임계값을 높이세요.
+
+- **갈매기형 화살표 버튼이 없음:**
+  - 확장 기능이 로드될 때까지 기다리거나 새로 고침하세요.
+
+- **캐릭터 데이터를 사용할 수 없음:**
+  - 채팅/그룹이 완전히 로드될 때까지 기다리세요.
+
+---
+
+## 📚 Lorebook Ordering (STLO)으로 파워업하기
+
+고급 기억 정리와 더 깊이 있는 스토리 통합을 위해 STMB를 [SillyTavern-LorebookOrdering (STLO)](https://github.com/aikohanasaki/SillyTavern-LorebookOrdering/blob/main/guides/STMB%20and%20STLO%20-%20Korean.md)와 함께 사용하는 것을 강력히 권장합니다. 모범 사례, 설정 방법, 팁 등은 가이드를 참조하세요.
+
+---
+
+## 📝 문자 정책 (Character Policy) (v4.5.1+)
+
+- **제목에 허용됨:** 악센트 문자, 이모지, 한중일(CJK) 문자 및 기호를 포함한 모든 출력 가능한 유니코드 문자가 허용됩니다.
+- **차단됨:** 유니코드 제어 문자(U+0000-U+001F, U+007F-U+009F)만 차단되며, 이는 자동으로 제거됩니다.
+
+예시 및 마이그레이션 참고 사항은 [문자 정책 세부 정보](../charset.md)를 참조하세요.
+
+---
+
+## 👨‍💻 개발자용
+
+### 확장 기능 빌드
+
+이 확장 기능은 빌드에 Bun을 사용합니다. 빌드 과정은 소스 파일을 minify하고 bundle합니다.
+
+```sh
+# 확장 기능 빌드
+bun run build
+```
+
+### Git Hooks
+
+이 프로젝트에는 확장 기능을 자동으로 빌드하고 빌드 산출물을 커밋에 포함시키는 pre-commit hook이 포함되어 있습니다. 이렇게 하면 빌드된 파일이 항상 소스 코드와 동기화됩니다.
+
+**git hook 설치:**
+
+```sh
+bun run install-hooks
+```
+
+hook은 다음을 수행합니다.
+
+- 각 커밋 전에 `bun run build` 실행
+- 빌드 산출물을 커밋에 추가
+- 빌드가 실패하면 커밋 중단
+
+---
+
+*VS Code/Cline, 광범위한 테스트, 그리고 커뮤니티 피드백을 통해 사랑으로 개발되었습니다.* 🤖💕

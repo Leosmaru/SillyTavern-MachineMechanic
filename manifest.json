@@ -1,0 +1,14 @@
+{
+    "display_name": "Механик машин",
+    "loading_order": 102,
+    "requires": [],
+    "optional": [],
+    "js": "machineMechanic.js",
+    "css": "style.build.css",
+    "author": "book-plugin",
+    "version": "0.1.0",
+    "license": "AGPL-3.0",
+    "homePage": "https://github.com/aikohanasaki/SillyTavern-MemoryBooks",
+    "auto_update": false,
+    "description": "Механик машин — форк Memory Books. Самостоятельный плагин: создаёт и хранит воспоминания чата в лорбуках. Копируется и дорабатывается локально."
+}

@@ -1,0 +1,1625 @@
+import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
+import { DOMPurify } from '../../../../lib.js';
+import { escapeHtml } from '../../../utils.js';
+import { extension_settings } from '../../../extensions.js';
+import { chat_metadata, saveSettingsDebounced } from '../../../../script.js';
+import { METADATA_KEY, world_names } from '../../../world-info.js';
+import {
+    listTemplates,
+    getTemplate,
+    upsertTemplate,
+    duplicateTemplate,
+    removeTemplate,
+    exportToJSON as exportSidePromptsJSON,
+    importFromJSON as importSidePromptsJSON,
+    recreateBuiltInSidePrompts,
+    listSets,
+    getSet,
+    upsertSet,
+    duplicateSet,
+    removeSet,
+} from './sidePromptsManager.js';
+import { sidePromptsTableTemplate } from './templatesSidePrompts.js';
+import { translate, applyLocale } from '../../../i18n.js';
+import { tr } from './i18nHelpers.js';
+import { applySidePromptMacros, collectTemplateRuntimeMacros, extractMacroTokens } from './sidePromptMacros.js';
+import { getSceneMarkers, saveMetadataForCurrentContext } from './sceneManager.js';
+import { showStmbEntryReviewPopup } from './clipManager.js';
+import { markStmbPopup, withGoBackButton } from './utils.js';
+
+/**
+ * Build a human-readable triggers summary array for display/search
+ * @param {any} tpl
+ * @returns {string[]}
+ */
+function getTriggersSummary(tpl) {
+    const badges = [];
+    const trig = tpl?.triggers || {};
+    if (trig.onInterval && Number(trig.onInterval.visibleMessages) >= 1) {
+        badges.push(`${translate('Interval', 'STMemoryBooks_Interval')}:${Number(trig.onInterval.visibleMessages)}`);
+    }
+    if (trig.onAfterMemory && !!trig.onAfterMemory.enabled) {
+        badges.push(translate('AfterMemory', 'STMemoryBooks_AfterMemory'));
+    }
+    if (Array.isArray(trig.commands) && trig.commands.some(c => String(c).toLowerCase() === 'sideprompt')) {
+        badges.push(translate('Manual', 'STMemoryBooks_Manual'));
+    }
+    return badges;
+}
+
+function getMacroValidationToastOptions() {
+    return {
+        timeOut: 0,
+        extendedTimeOut: 0,
+        tapToDismiss: true,
+        closeButton: true,
+    };
+}
+
+function getRuntimeMacroStrippedToastOptions() {
+    return {
+        timeOut: 0,
+        extendedTimeOut: 0,
+        tapToDismiss: true,
+        closeButton: true,
+    };
+}
+
+function validateRuntimeMacroTriggerConfig({ name, prompt, responseFormat, titleOverride, intervalOn, afterOn }) {
+    const runtimeMacros = collectTemplateRuntimeMacros({
+        prompt,
+        responseFormat,
+        settings: {
+            lorebook: {
+                entryTitleOverride: String(titleOverride || ''),
+            },
+        },
+    });
+    if (runtimeMacros.length === 0) {
+        return { ok: true, runtimeMacros, strippedAutoTriggers: [] };
+    }
+
+    const strippedAutoTriggers = [];
+    if (intervalOn) strippedAutoTriggers.push(translate('Run on visible message interval', 'STMemoryBooks_RunOnVisibleMessageInterval'));
+    if (afterOn) strippedAutoTriggers.push(translate('Run automatically after memory', 'STMemoryBooks_RunAutomaticallyAfterMemory'));
+
+    if (strippedAutoTriggers.length === 0) {
+        return { ok: true, runtimeMacros, strippedAutoTriggers };
+    }
+
+    const displayName = String(name || translate('Untitled Side Prompt', 'STMemoryBooks_UntitledSidePrompt'));
+    const usage = `/sideprompt "${displayName}" ${runtimeMacros.map(token => `${token}="value"`).join(' ')}`;
+    const message = tr(
+        'STMemoryBooks_RuntimeMacroTriggersStripped',
+        'Stripped {{triggers}} from "{{name}}" because it contains custom runtime macros: {{macros}}. Run it manually with {{usage}}.',
+        {
+            triggers: strippedAutoTriggers.join(', '),
+            name: displayName,
+            macros: runtimeMacros.join(', '),
+            usage,
+        },
+    );
+    toastr.warning(message, translate('STMemoryBooks', 'index.toast.title'), getMacroValidationToastOptions());
+    return { ok: true, runtimeMacros, strippedAutoTriggers };
+}
+
+function formatStrippedTriggerLabel(triggerKey) {
+    if (triggerKey === 'onInterval') {
+        return translate('Run on visible message interval', 'STMemoryBooks_RunOnVisibleMessageInterval');
+    }
+    if (triggerKey === 'onAfterMemory') {
+        return translate('Run automatically after memory', 'STMemoryBooks_RunAutomaticallyAfterMemory');
+    }
+    return triggerKey;
+}
+
+function showRuntimeMacroImportNormalizationToast(strippedDetails) {
+    if (!Array.isArray(strippedDetails) || strippedDetails.length === 0) {
+        return;
+    }
+
+    const details = strippedDetails
+        .map(({ name, triggers }) => {
+            const triggerLabels = Array.isArray(triggers) ? triggers.map(formatStrippedTriggerLabel).join(', ') : '';
+            return `"${String(name || translate('Untitled Side Prompt', 'STMemoryBooks_UntitledSidePrompt'))}" (${triggerLabels})`;
+        })
+        .join('; ');
+
+    const message = tr(
+        'STMemoryBooks_RuntimeMacroImportStripped',
+        'Stripped automatic triggers from imported side prompts because they contain custom runtime macros: {{details}}.',
+        { details },
+    );
+    toastr.warning(message, translate('STMemoryBooks', 'index.toast.title'), getRuntimeMacroStrippedToastOptions());
+}
+
+function isStandardKeywordMacro(token) {
+    const unresolved = extractMacroTokens(applySidePromptMacros(String(token || '')));
+    return !unresolved.includes(token);
+}
+
+function validateKeywordsMacroConfig({ prompt, responseFormat, keywordsTemplate }) {
+    const normalizedKeywords = String(keywordsTemplate || '').trim();
+    if (!normalizedKeywords) {
+        return { ok: true };
+    }
+
+    const allowedMacros = new Set([
+        ...extractMacroTokens(prompt),
+        ...extractMacroTokens(responseFormat),
+    ]);
+    const disallowedMacros = extractMacroTokens(normalizedKeywords).filter(token => !allowedMacros.has(token) && !isStandardKeywordMacro(token));
+    if (disallowedMacros.length === 0) {
+        return { ok: true };
+    }
+
+    toastr.error(
+        tr(
+            'STMemoryBooks_SidePromptKeywordsInvalidMacros',
+            'Lorebook Entry Keywords may only use ST standard macros or macros already defined in Prompt or Response Format: {{macros}}.',
+            { macros: disallowedMacros.join(', ') },
+        ),
+        translate('STMemoryBooks', 'index.toast.title'),
+    );
+    return { ok: false, disallowedMacros };
+}
+
+function getMemoryLorebookName() {
+    const settings = extension_settings?.STMemoryBooks;
+    const markers = getSceneMarkers() || {};
+    return settings?.moduleSettings?.manualModeEnabled
+        ? (markers.manualLorebook || null)
+        : (chat_metadata?.[METADATA_KEY] || null);
+}
+
+function getChatSidePromptLorebookOverrides() {
+    const markers = getSceneMarkers() || {};
+    return markers.sidePromptLorebookOverrides && typeof markers.sidePromptLorebookOverrides === 'object'
+        ? markers.sidePromptLorebookOverrides
+        : {};
+}
+
+function setChatSidePromptLorebookOverride(key, lorebookName) {
+    const normalizedKey = String(key || '').trim();
+    if (!normalizedKey) return;
+
+    const markers = getSceneMarkers() || {};
+    if (!markers.sidePromptLorebookOverrides || typeof markers.sidePromptLorebookOverrides !== 'object') {
+        markers.sidePromptLorebookOverrides = {};
+    }
+
+    const normalizedLorebook = String(lorebookName || '').trim();
+    if (normalizedLorebook) {
+        markers.sidePromptLorebookOverrides[normalizedKey] = normalizedLorebook;
+    } else {
+        delete markers.sidePromptLorebookOverrides[normalizedKey];
+        if (Object.keys(markers.sidePromptLorebookOverrides).length === 0) {
+            delete markers.sidePromptLorebookOverrides;
+        }
+    }
+
+    saveMetadataForCurrentContext();
+}
+
+function getChatAfterMemorySetKey() {
+    const markers = getSceneMarkers() || {};
+    return String(markers.sidePromptAfterMemorySetKey || '').trim();
+}
+
+function setChatAfterMemorySetKey(setKey) {
+    const markers = getSceneMarkers() || {};
+    const normalized = String(setKey || '').trim();
+    if (normalized) {
+        markers.sidePromptAfterMemorySetKey = normalized;
+    } else {
+        delete markers.sidePromptAfterMemorySetKey;
+    }
+    saveMetadataForCurrentContext();
+}
+
+function getSidePromptLorebookTargetInfo(tpl) {
+    const key = String(tpl?.key || '').trim();
+    const chatOverrides = getChatSidePromptLorebookOverrides();
+    const hasChatOverride = key && Object.hasOwn(chatOverrides, key);
+    const chatOverride = hasChatOverride ? String(chatOverrides[key] || '').trim() : '';
+    const templateOverride = String(tpl?.settings?.lorebook?.targetLorebookName || '').trim();
+    const memoryLorebook = getMemoryLorebookName();
+
+    if (hasChatOverride && chatOverride === '__memory__') {
+        return {
+            value: memoryLorebook || '',
+            source: 'chat',
+            sourceLabel: translate('Chat override', 'STMemoryBooks_SidePromptLorebookSourceChat'),
+        };
+    }
+
+    if (hasChatOverride && chatOverride && Array.isArray(world_names) && world_names.includes(chatOverride)) {
+        return {
+            value: chatOverride,
+            source: 'chat',
+            sourceLabel: translate('Chat override', 'STMemoryBooks_SidePromptLorebookSourceChat'),
+        };
+    }
+
+    if (templateOverride && Array.isArray(world_names) && world_names.includes(templateOverride)) {
+        return {
+            value: templateOverride,
+            source: 'template',
+            sourceLabel: translate('Side prompt setting', 'STMemoryBooks_SidePromptLorebookSourceTemplate'),
+        };
+    }
+
+    return {
+        value: memoryLorebook || '',
+        source: 'memory',
+        sourceLabel: translate('Memory book default', 'STMemoryBooks_SidePromptLorebookSourceMemory'),
+    };
+}
+
+function getLorebookTargetSelectValue(tpl) {
+    const key = String(tpl?.key || '').trim();
+    const chatOverrides = getChatSidePromptLorebookOverrides();
+    const hasChatOverride = key && Object.hasOwn(chatOverrides, key);
+    const chatOverride = hasChatOverride ? String(chatOverrides[key] || '').trim() : '';
+    if (hasChatOverride && chatOverride === '__memory__') {
+        return '__memory__';
+    }
+    if (hasChatOverride && chatOverride && Array.isArray(world_names) && world_names.includes(chatOverride)) {
+        return chatOverride;
+    }
+
+    const templateOverride = String(tpl?.settings?.lorebook?.targetLorebookName || '').trim();
+    if (templateOverride && Array.isArray(world_names) && world_names.includes(templateOverride)) {
+        return templateOverride;
+    }
+
+    return '__memory__';
+}
+
+function buildLorebookTargetBlock({ idPrefix, tpl = null }) {
+    const targetInfo = getSidePromptLorebookTargetInfo(tpl);
+    const selectedValue = getLorebookTargetSelectValue(tpl);
+    const memoryLorebook = getMemoryLorebookName();
+    const currentTarget = targetInfo.value || translate('None selected', 'STMemoryBooks_NoneSelected');
+    const memoryLabel = memoryLorebook
+        ? tr('STMemoryBooks_SidePromptLorebookSameAsMemoryNamed', 'Same as memory lorebook ({{name}})', { name: memoryLorebook })
+        : translate('Same as memory lorebook (none selected)', 'STMemoryBooks_SidePromptLorebookSameAsMemoryNone');
+    const options = [
+        `<option value="__memory__" ${selectedValue === '__memory__' ? 'selected' : ''}>${escapeHtml(memoryLabel)}</option>`,
+        ...((Array.isArray(world_names) ? world_names : []).map(name =>
+            `<option value="${escapeHtml(name)}" ${selectedValue === name ? 'selected' : ''}>${escapeHtml(name)}</option>`
+        )),
+    ].join('');
+
+    return `
+        <div class="world_entry_form_control stmb-sp-lorebook-target">
+            <h4>${escapeHtml(translate('Lorebook Target', 'STMemoryBooks_SidePromptLorebookTarget'))}</h4>
+            <div class="info-block">
+                <small class="opacity50p">${escapeHtml(translate('Current Target:', 'STMemoryBooks_SidePromptLorebookCurrentTarget'))}</small>
+                <h5 id="${idPrefix}-target-current">${escapeHtml(currentTarget)}</h5>
+                <small class="opacity50p">${escapeHtml(translate('Source:', 'STMemoryBooks_SidePromptLorebookSource'))}</small>
+                <h5 id="${idPrefix}-target-source">${escapeHtml(targetInfo.sourceLabel)}</h5>
+            </div>
+            <label for="${idPrefix}-target-select">
+                <h5 style="margin: 8px 0 4px 0;">${escapeHtml(translate('Save side prompt entry to:', 'STMemoryBooks_SidePromptLorebookSaveTo'))}</h5>
+                <select id="${idPrefix}-target-select" class="text_pole" data-original-value="${escapeHtml(selectedValue)}">
+                    ${options}
+                </select>
+            </label>
+            <small class="opacity70p">${escapeHtml(translate('Changing this target will ask whether to save it for this chat only or for this side prompt going forward.', 'STMemoryBooks_SidePromptLorebookHelp'))}</small>
+        </div>
+    `;
+}
+
+async function promptLorebookTargetSaveScope() {
+    const content = DOMPurify.sanitize(`
+        <h3>${escapeHtml(translate('Save Lorebook Target', 'STMemoryBooks_SaveLorebookTarget'))}</h3>
+        <div class="world_entry_form_control">
+            <p>${escapeHtml(translate('Save this side prompt lorebook target for this chat only, or for this side prompt going forward?', 'STMemoryBooks_SaveLorebookTargetDesc'))}</p>
+        </div>
+    `);
+    const popup = new Popup(content, POPUP_TYPE.TEXT, '', {
+        okButton: false,
+        cancelButton: translate('Cancel', 'STMemoryBooks_Cancel'),
+        customButtons: [
+            {
+                text: translate('This chat only', 'STMemoryBooks_ThisChatOnly'),
+                result: POPUP_RESULT.CUSTOM1,
+                appendAtEnd: true,
+            },
+            {
+                text: translate('This side prompt going forward', 'STMemoryBooks_ThisSidePromptGoingForward'),
+                result: POPUP_RESULT.CUSTOM2,
+                appendAtEnd: true,
+            },
+        ],
+    });
+    markStmbPopup(popup);
+
+    const result = await popup.show();
+    if (result === POPUP_RESULT.CUSTOM1) return 'chat';
+    if (result === POPUP_RESULT.CUSTOM2) return 'template';
+    return null;
+}
+
+/**
+ * Render the templates table HTML using Handlebars
+ * @param {Array} templates
+ * @returns {string}
+ */
+function renderTemplatesTable(templates) {
+    const items = (templates || []).map(t => ({
+        key: String(t.key || ''),
+        name: String(t.name || ''),
+        badges: getTriggersSummary(t),
+    }));
+    return sidePromptsTableTemplate({ items });
+}
+
+/**
+ * Refresh the list in the open popup
+ * @param {Popup} popup
+ * @param {string|null} preserveKey
+ */
+async function refreshList(popup, preserveKey = null) {
+    const listContainer = popup?.dlg?.querySelector('#stmb-sp-list');
+    if (!listContainer) return;
+
+    const searchTerm = (popup?.dlg?.querySelector('#stmb-sp-search')?.value || '').toLowerCase();
+
+    const templates = await listTemplates();
+    const filtered = searchTerm
+        ? templates.filter(t => {
+            const nameMatch = t.name.toLowerCase().includes(searchTerm);
+            const trigStr = getTriggersSummary(t).join(' ').toLowerCase();
+            return nameMatch || trigStr.includes(searchTerm);
+        })
+        : templates;
+
+    listContainer.innerHTML = DOMPurify.sanitize(renderTemplatesTable(filtered));
+    try { applyLocale(listContainer); } catch (e) { /* no-op */ }
+
+    // Restore selection
+    if (preserveKey) {
+        const row = listContainer.querySelector(`tr[data-tpl-key="${CSS.escape(preserveKey)}"]`);
+        if (row) {
+            row.style.backgroundColor = 'var(--cobalt30a)';
+            row.style.border = '';
+        }
+    }
+}
+
+function renderAfterMemorySetMode(sets) {
+    const selectedKey = getChatAfterMemorySetKey();
+    const hasSelected = selectedKey && (sets || []).some(set => set.key === selectedKey);
+    const options = [
+        `<option value="" ${!selectedKey ? 'selected' : ''}>${escapeHtml(translate('Use individually-enabled side prompts', 'STMemoryBooks_UseIndividuallyEnabledSidePrompts'))}</option>`,
+        ...(hasSelected ? [] : selectedKey ? [`<option value="${escapeHtml(selectedKey)}" selected>${escapeHtml(tr('STMemoryBooks_MissingSidePromptSetOption', 'Missing set: {{key}}', { key: selectedKey }))}</option>`] : []),
+        ...(sets || []).map(set => `<option value="${escapeHtml(set.key)}" ${selectedKey === set.key ? 'selected' : ''}>${escapeHtml(set.name)}</option>`),
+    ].join('');
+
+    return `
+        <div class="world_entry_form_control">
+            <label for="stmb-sp-after-memory-set-mode">
+                <h4>${escapeHtml(translate('After-memory side prompt mode for this chat', 'STMemoryBooks_AfterMemorySidePromptMode'))}</h4>
+                <select id="stmb-sp-after-memory-set-mode" class="text_pole">
+                    ${options}
+                </select>
+            </label>
+            <small class="opacity70p">${escapeHtml(translate('Selecting a side prompt set replaces individually-enabled after-memory side prompts for this chat. Leave this set to individually-enabled side prompts to use the old behavior.', 'STMemoryBooks_SidePromptSetModeHelp'))}</small>
+        </div>
+    `;
+}
+
+function renderSetsList(sets) {
+    const rows = (sets || []).map(set => `
+        <tr data-set-key="${escapeHtml(set.key)}" style="border-bottom: 1px solid var(--SmartThemeBorderColor);">
+            <td style="padding: 8px;">${escapeHtml(set.name)}</td>
+            <td style="padding: 8px;">${Number(set.items?.length || 0)}</td>
+            <td style="padding: 8px; text-align:right;">
+                <span class="stmb-sp-inline-actions" style="display: inline-flex; gap: 10px;">
+                    <button class="stmb-sp-set-action stmb-sp-set-action-edit" title="${escapeHtml(translate('Edit', 'STMemoryBooks_Edit'))}" aria-label="${escapeHtml(translate('Edit', 'STMemoryBooks_Edit'))}" style="background:none;border:none;cursor:pointer;"><i class="fa-solid fa-pen"></i></button>
+                    <button class="stmb-sp-set-action stmb-sp-set-action-duplicate" title="${escapeHtml(translate('Duplicate', 'STMemoryBooks_Duplicate'))}" aria-label="${escapeHtml(translate('Duplicate', 'STMemoryBooks_Duplicate'))}" style="background:none;border:none;cursor:pointer;"><i class="fa-solid fa-copy"></i></button>
+                    <button class="stmb-sp-set-action stmb-sp-set-action-delete" title="${escapeHtml(translate('Delete', 'STMemoryBooks_Delete'))}" aria-label="${escapeHtml(translate('Delete', 'STMemoryBooks_Delete'))}" style="background:none;border:none;cursor:pointer;color:var(--redColor);"><i class="fa-solid fa-trash"></i></button>
+                </span>
+            </td>
+        </tr>
+    `).join('');
+
+    return `
+        <div class="world_entry_form_control">
+            <h4>${escapeHtml(translate('Side Prompt Sets', 'STMemoryBooks_SidePromptSets'))}</h4>
+            <small class="opacity70p">${escapeHtml(translate('Sets define which side prompts run instead of individually-enabled after-memory side prompts when a chat selects that set.', 'STMemoryBooks_SidePromptSetsHelp'))}</small>
+            <div style="max-height: 220px; overflow-y: auto; margin-top: 8px;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr>
+                            <th style="text-align:left;">${escapeHtml(translate('Name', 'STMemoryBooks_Name'))}</th>
+                            <th style="width: 80px; text-align:left;">${escapeHtml(translate('Items', 'STMemoryBooks_Items'))}</th>
+                            <th style="width: 120px; text-align:right;">${escapeHtml(translate('Actions', 'STMemoryBooks_Actions'))}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows || `<tr><td colspan="3"><div class="opacity50p">${escapeHtml(translate('No side prompt sets available', 'STMemoryBooks_NoSidePromptSetsAvailable'))}</div></td></tr>`}
+                    </tbody>
+                </table>
+            </div>
+            <div class="buttons_block justifyCenter gap10px whitespacenowrap" style="margin-top: 8px;">
+                <button id="stmb-sp-new-set" class="menu_button whitespacenowrap">${escapeHtml(translate('New Set', 'STMemoryBooks_NewSidePromptSet'))}</button>
+            </div>
+        </div>
+    `;
+}
+
+async function refreshSetControls(popup) {
+    const container = popup?.dlg?.querySelector('#stmb-sp-set-controls');
+    if (!container) return;
+    const sets = await listSets();
+    container.innerHTML = DOMPurify.sanitize(renderAfterMemorySetMode(sets) + renderSetsList(sets));
+    try { applyLocale(container); } catch (e) { /* no-op */ }
+
+    container.querySelector('#stmb-sp-after-memory-set-mode')?.addEventListener('change', (e) => {
+        setChatAfterMemorySetKey(e.target.value || '');
+        toastr.success(translate('After-memory side prompt mode saved for this chat.', 'STMemoryBooks_SidePromptSetModeSaved'), translate('STMemoryBooks', 'index.toast.title'));
+    });
+    container.querySelector('#stmb-sp-new-set')?.addEventListener('click', async () => {
+        await openEditSet(popup, null);
+    });
+}
+
+function makeSetItemId() {
+    return `item-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getTemplateOptions(templates, selectedKey) {
+    return (templates || []).map(tpl =>
+        `<option value="${escapeHtml(tpl.key)}" ${selectedKey === tpl.key ? 'selected' : ''}>${escapeHtml(tpl.name)}</option>`
+    ).join('');
+}
+
+function buildSetItemMacroFields(tpl, item) {
+    const macros = tpl ? collectTemplateRuntimeMacros(tpl) : [];
+    if (macros.length === 0) {
+        return `<small class="opacity50p">${escapeHtml(translate('No runtime macros for this side prompt.', 'STMemoryBooks_NoRuntimeMacrosForSidePrompt'))}</small>`;
+    }
+    return macros.map(token => `
+        <label style="display:block; margin-top: 6px;">
+            <small>${escapeHtml(token)}</small>
+            <input type="text" class="text_pole stmb-sp-set-item-macro" data-token="${escapeHtml(token)}" value="${escapeHtml(item?.runtimeMacros?.[token] || '')}" placeholder="${escapeHtml(translate('Literal value or set macro, e.g. {{npc_1}}', 'STMemoryBooks_SetMacroValuePlaceholder'))}">
+        </label>
+    `).join('');
+}
+
+function renderSetItemRow(item, templates) {
+    const tpl = (templates || []).find(t => t.key === item.promptKey) || templates?.[0] || null;
+    const promptKey = item.promptKey || tpl?.key || '';
+    return `
+        <div class="stmb-sp-set-item" data-item-id="${escapeHtml(item.id || makeSetItemId())}" style="border:1px solid var(--SmartThemeBorderColor); padding:8px; margin-bottom:8px;">
+            <div class="flex-container" style="gap:8px; align-items:end; flex-wrap:wrap;">
+                <label style="flex: 1 1 220px;">
+                    <h5 style="margin:0 0 4px 0;">${escapeHtml(translate('Side Prompt', 'STMemoryBooks_SidePrompt'))}</h5>
+                    <select class="text_pole stmb-sp-set-item-prompt">
+                        ${getTemplateOptions(templates, promptKey)}
+                    </select>
+                </label>
+                <label style="flex: 1 1 220px;">
+                    <h5 style="margin:0 0 4px 0;">${escapeHtml(translate('Row Label / Title', 'STMemoryBooks_SetItemLabel'))}</h5>
+                    <input type="text" class="text_pole stmb-sp-set-item-label" value="${escapeHtml(item.label || '')}" placeholder="${escapeHtml(translate('Optional title for this row', 'STMemoryBooks_SetItemLabelPlaceholder'))}">
+                </label>
+                <button class="menu_button stmb-sp-set-item-up" type="button" title="${escapeHtml(translate('Move up', 'STMemoryBooks_MoveUp'))}"><i class="fa-solid fa-arrow-up"></i></button>
+                <button class="menu_button stmb-sp-set-item-down" type="button" title="${escapeHtml(translate('Move down', 'STMemoryBooks_MoveDown'))}"><i class="fa-solid fa-arrow-down"></i></button>
+                <button class="menu_button stmb-sp-set-item-copy" type="button" title="${escapeHtml(translate('Duplicate', 'STMemoryBooks_Duplicate'))}"><i class="fa-solid fa-copy"></i></button>
+                <button class="menu_button stmb-sp-set-item-delete" type="button" title="${escapeHtml(translate('Delete', 'STMemoryBooks_Delete'))}"><i class="fa-solid fa-trash"></i></button>
+            </div>
+            <div class="stmb-sp-set-item-macros" style="margin-top:8px;">
+                <h5 style="margin:0 0 4px 0;">${escapeHtml(translate('Macro Values', 'STMemoryBooks_MacroValues'))}</h5>
+                ${buildSetItemMacroFields(tpl, item)}
+            </div>
+        </div>
+    `;
+}
+
+function collectSetItemFromRow(row) {
+    const runtimeMacros = {};
+    row.querySelectorAll('.stmb-sp-set-item-macro').forEach(input => {
+        const token = input.dataset.token;
+        if (token) runtimeMacros[token] = input.value || '';
+    });
+    return {
+        id: row.dataset.itemId || makeSetItemId(),
+        promptKey: row.querySelector('.stmb-sp-set-item-prompt')?.value || '',
+        label: row.querySelector('.stmb-sp-set-item-label')?.value?.trim() || '',
+        runtimeMacros,
+    };
+}
+
+function collectSetItemsFromDialog(dlg) {
+    return Array.from(dlg.querySelectorAll('.stmb-sp-set-item'))
+        .map(collectSetItemFromRow)
+        .filter(item => item.promptKey);
+}
+
+async function openEditSet(parentPopup, key = null) {
+    const templates = await listTemplates();
+    if (!templates.length) {
+        toastr.error(translate('Create a side prompt before creating a set.', 'STMemoryBooks_CreateSidePromptBeforeSet'), translate('STMemoryBooks', 'index.toast.title'));
+        return;
+    }
+    const existing = key ? await getSet(key) : null;
+    const initialItems = existing?.items?.length
+        ? existing.items
+        : [{ id: makeSetItemId(), promptKey: templates[0].key, label: '', runtimeMacros: {} }];
+    const rows = initialItems.map(item => renderSetItemRow(item, templates)).join('');
+    const content = `
+        <h3>${escapeHtml(existing ? translate('Edit Side Prompt Set', 'STMemoryBooks_EditSidePromptSet') : translate('New Side Prompt Set', 'STMemoryBooks_NewSidePromptSet'))}</h3>
+        <div class="world_entry_form_control">
+            <label for="stmb-sp-set-name">
+                <h4>${escapeHtml(translate('Set Name', 'STMemoryBooks_SetName'))}</h4>
+                <input id="stmb-sp-set-name" class="text_pole" type="text" value="${escapeHtml(existing?.name || '')}">
+            </label>
+        </div>
+        <div class="world_entry_form_control">
+            <small class="opacity70p">${escapeHtml(translate('Each row runs one side prompt. You can use literal macro values or set-level macros like {{npc_1}} for /sideprompt-macroset.', 'STMemoryBooks_SetEditorHelp'))}</small>
+        </div>
+        <div id="stmb-sp-set-items">${rows}</div>
+        <div class="buttons_block justifyCenter gap10px whitespacenowrap">
+            <button id="stmb-sp-set-add-item" class="menu_button whitespacenowrap" type="button">${escapeHtml(translate('Add Row', 'STMemoryBooks_AddSetItem'))}</button>
+        </div>
+    `;
+
+    const setPopup = new Popup(DOMPurify.sanitize(content), POPUP_TYPE.TEXT, '', withGoBackButton({
+        wide: true,
+        large: true,
+        allowVerticalScrolling: true,
+        okButton: translate('Save', 'STMemoryBooks_Save'),
+        cancelButton: translate('Cancel', 'STMemoryBooks_Cancel'),
+    }));
+
+    const attachHandlers = () => {
+        const dlg = setPopup.dlg;
+        if (!dlg) return;
+        const rowsContainer = dlg.querySelector('#stmb-sp-set-items');
+        const refreshRowMacros = (row) => {
+            const item = collectSetItemFromRow(row);
+            const tpl = templates.find(t => t.key === item.promptKey) || templates[0];
+            const macroContainer = row.querySelector('.stmb-sp-set-item-macros');
+            if (macroContainer) {
+                macroContainer.innerHTML = DOMPurify.sanitize(`<h5 style="margin:0 0 4px 0;">${escapeHtml(translate('Macro Values', 'STMemoryBooks_MacroValues'))}</h5>${buildSetItemMacroFields(tpl, item)}`);
+            }
+        };
+        dlg.querySelector('#stmb-sp-set-add-item')?.addEventListener('click', () => {
+            rowsContainer.insertAdjacentHTML('beforeend', DOMPurify.sanitize(renderSetItemRow({ id: makeSetItemId(), promptKey: templates[0].key, label: '', runtimeMacros: {} }, templates)));
+        });
+        dlg.addEventListener('change', (e) => {
+            const row = e.target.closest('.stmb-sp-set-item');
+            if (row && e.target.classList.contains('stmb-sp-set-item-prompt')) {
+                refreshRowMacros(row);
+            }
+        });
+        dlg.addEventListener('click', (e) => {
+            const row = e.target.closest('.stmb-sp-set-item');
+            if (!row) return;
+            if (e.target.closest('.stmb-sp-set-item-delete')) {
+                row.remove();
+            } else if (e.target.closest('.stmb-sp-set-item-copy')) {
+                const item = collectSetItemFromRow(row);
+                item.id = makeSetItemId();
+                row.insertAdjacentHTML('afterend', DOMPurify.sanitize(renderSetItemRow(item, templates)));
+            } else if (e.target.closest('.stmb-sp-set-item-up')) {
+                const prev = row.previousElementSibling;
+                if (prev) row.parentElement.insertBefore(row, prev);
+            } else if (e.target.closest('.stmb-sp-set-item-down')) {
+                const next = row.nextElementSibling;
+                if (next) row.parentElement.insertBefore(next, row);
+            }
+        });
+    };
+
+    const showPromise = setPopup.show();
+    attachHandlers();
+    const result = await showPromise;
+    if (result !== POPUP_RESULT.AFFIRMATIVE) return;
+
+    const dlg = setPopup.dlg;
+    const name = dlg.querySelector('#stmb-sp-set-name')?.value?.trim() || '';
+    const items = collectSetItemsFromDialog(dlg);
+    if (!items.length) {
+        toastr.error(translate('Add at least one side prompt to the set.', 'STMemoryBooks_SetNeedsItem'), translate('STMemoryBooks', 'index.toast.title'));
+        return;
+    }
+
+    try {
+        await upsertSet({ key: existing?.key || null, name, items });
+        toastr.success(translate('Side prompt set saved.', 'STMemoryBooks_SidePromptSetSaved'), translate('STMemoryBooks', 'index.toast.title'));
+        window.dispatchEvent(new CustomEvent('stmb-sideprompts-updated'));
+        await refreshSetControls(parentPopup);
+    } catch (err) {
+        console.error('STMemoryBooks: Error saving side prompt set:', err);
+        toastr.error(translate('Failed to save side prompt set.', 'STMemoryBooks_FailedToSaveSidePromptSet'), translate('STMemoryBooks', 'index.toast.title'));
+    }
+}
+
+/**
+ * Open editor for an existing template (triggers-based)
+ * @param {Popup} parentPopup
+ * @param {string} key
+ */
+async function openEditTemplate(parentPopup, key) {
+    try {
+        const tpl = await getTemplate(key);
+        if (!tpl) {
+            toastr.error(tr('STMemoryBooks_TemplateNotFound', 'Template "{{key}}" not found', { key }), translate('STMemoryBooks', 'index.toast.title'));
+            return;
+        }
+
+        const currentEnabled = !!tpl.enabled;
+        const s = tpl.settings || {};
+        const trig = tpl.triggers || {};
+
+        const intervalEnabled = !!(trig.onInterval && Number(trig.onInterval.visibleMessages) >= 1);
+        const intervalVal = intervalEnabled ? Math.max(1, Number(trig.onInterval.visibleMessages)) : 50;
+        const afterEnabled = !!(trig.onAfterMemory && trig.onAfterMemory.enabled);
+            const manualEnabled = Array.isArray(trig.commands)
+            ? trig.commands.some(c => String(c).toLowerCase() === 'sideprompt')
+            : false; // default to false for manual when not specified
+
+        // Per-template override controls
+        const profiles = extension_settings?.STMemoryBooks?.profiles || [];
+        let idx = Number.isFinite(s.overrideProfileIndex) ? Number(s.overrideProfileIndex) : (extension_settings?.STMemoryBooks?.defaultProfile ?? 0);
+        if (!(idx >= 0 && idx < profiles.length)) idx = 0;
+        const overrideEnabled = !!s.overrideProfileEnabled;
+        const options = profiles.map((p, i) =>
+            `<option value="${i}" ${i === idx ? 'selected' : ''}>${escapeHtml(p?.name || ('Profile ' + (i + 1)))}</option>`
+        ).join('');
+
+        const overrideHtml = `
+            <div class="world_entry_form_control">
+                <label class="checkbox_label">
+                    <input type="checkbox" id="stmb-sp-edit-override-enabled" ${overrideEnabled ? 'checked' : ''}>
+                    <span>${escapeHtml(translate('Override default memory profile', 'STMemoryBooks_OverrideDefaultMemoryProfile'))}</span>
+                </label>
+            </div>
+            <div class="world_entry_form_control" id="stmb-sp-edit-override-container" style="display: ${overrideEnabled ? 'block' : 'none'};">
+                <label for="stmb-sp-edit-override-index">
+                    <h4>${escapeHtml(translate('Connection Profile:', 'STMemoryBooks_ConnectionProfile'))}</h4>
+                    <select id="stmb-sp-edit-override-index" class="text_pole">
+                        ${options}
+                    </select>
+                </label>
+            </div>
+        `;
+
+        // Lorebook entry settings (defaults with safe fallbacks)
+        const prevMemCount = Number.isFinite(s.previousMemoriesCount) ? Number(s.previousMemoriesCount) : 0;
+        const lb = (s && s.lorebook) || {};
+        const lbMode = lb.constVectMode || 'link';
+        const lbPosition = Number.isFinite(lb.position) ? Number(lb.position) : 0;
+        const lbOrderManual = lb.orderMode === 'manual';
+        const lbOrderValue = Number.isFinite(lb.orderValue) ? Number(lb.orderValue) : 100;
+        const lbPrevent = lb.preventRecursion !== false;
+        const lbDelay = !!lb.delayUntilRecursion;
+        const lbIgnoreBudget = !!lb.ignoreBudget;
+        const lbEntryTitleOverride = String(lb.entryTitleOverride || '');
+        const lbEntryKeywords = String(lb.entryKeywords || '');
+
+        const content = `
+            <h3>${escapeHtml(translate('Edit Side Prompt', 'STMemoryBooks_EditSidePrompt'))}</h3>
+            <div class="world_entry_form_control">
+                <small>${escapeHtml(translate('Key:', 'STMemoryBooks_Key'))} <code>${escapeHtml(tpl.key)}</code></small>
+            </div>
+            <div class="world_entry_form_control">
+                <label for="stmb-sp-edit-name">
+                    <h4>${escapeHtml(translate('Name:', 'STMemoryBooks_Name'))}</h4>
+                    <input type="text" id="stmb-sp-edit-name" class="text_pole" value="${escapeHtml(tpl.name)}" />
+                </label>
+            </div>
+            <div class="world_entry_form_control">
+                <label class="checkbox_label">
+                    <input type="checkbox" id="stmb-sp-edit-enabled" ${currentEnabled ? 'checked' : ''}>
+                    <span>${escapeHtml(translate('Enabled', 'STMemoryBooks_Enabled'))}</span>
+                </label>
+            </div>
+            <div class="world_entry_form_control">
+                <h4>${escapeHtml(translate('Triggers:', 'STMemoryBooks_Triggers'))}</h4>
+                <label class="checkbox_label">
+                    <input type="checkbox" id="stmb-sp-edit-trg-interval" ${intervalEnabled ? 'checked' : ''}>
+                    <span>${escapeHtml(translate('Run on visible message interval', 'STMemoryBooks_RunOnVisibleMessageInterval'))}</span>
+                </label>
+                <div id="stmb-sp-edit-interval-container" style="display:${intervalEnabled ? 'block' : 'none'}; margin-left:28px;">
+                    <label for="stmb-sp-edit-interval">
+                        <h4 style="margin: 0 0 4px 0;">${escapeHtml(translate('Interval (visible messages):', 'STMemoryBooks_IntervalVisibleMessages'))}</h4>
+                        <input type="number" id="stmb-sp-edit-interval" class="text_pole" min="1" step="1" value="${intervalVal}">
+                    </label>
+                </div>
+                <label class="checkbox_label">
+                    <input type="checkbox" id="stmb-sp-edit-trg-aftermem" ${afterEnabled ? 'checked' : ''}>
+                    <span>${escapeHtml(translate('Run automatically after memory', 'STMemoryBooks_RunAutomaticallyAfterMemory'))}</span>
+                </label>
+                <label class="checkbox_label">
+                    <input type="checkbox" id="stmb-sp-edit-trg-manual" ${manualEnabled ? 'checked' : ''}>
+                    <span>${escapeHtml(translate('Allow manual run via /sideprompt', 'STMemoryBooks_AllowManualRunViaSideprompt'))}</span>
+                </label>
+            </div>
+
+            <div class="world_entry_form_control">
+                <label for="stmb-sp-edit-prev-mem-count">
+                    <h5>${escapeHtml(translate('Previous memories for context:', 'STMemoryBooks_PreviousMemoriesForContext'))}</h5>
+                    <input type="number" id="stmb-sp-edit-prev-mem-count" class="text_pole" min="0" max="7" step="1" value="${prevMemCount}">
+                </label>
+                <small class="opacity70p">${escapeHtml(translate('Number of previous memory entries to include before scene text (0 = none).', 'STMemoryBooks_PreviousMemoriesHelp'))}</small>
+            </div>
+
+            ${buildLorebookTargetBlock({ idPrefix: 'stmb-sp-edit-lb', tpl })}
+
+            <div class="world_entry_form_control">
+                <label for="stmb-sp-edit-prompt">
+                    <h4>${escapeHtml(translate('Prompt:', 'STMemoryBooks_PromptTitle'))}</h4>
+                    <i class="editor_maximize fa-solid fa-maximize right_menu_button" data-for="stmb-sp-edit-prompt" title="Expand the editor" data-i18n="[title]STMemoryBooks_ExpandEditor"></i>
+                    <textarea id="stmb-sp-edit-prompt" class="text_pole textarea_compact" rows="10">${escapeHtml(tpl.prompt || '')}</textarea>
+                </label>
+            </div>
+            <div class="world_entry_form_control">
+                <label for="stmb-sp-edit-response-format">
+                    <h4>${escapeHtml(translate('Response Format (optional):', 'STMemoryBooks_ResponseFormatOptional'))}</h4>
+                    <i class="editor_maximize fa-solid fa-maximize right_menu_button" data-for="stmb-sp-edit-response-format" title="Expand the editor" data-i18n="[title]STMemoryBooks_ExpandEditor"></i>
+                    <textarea id="stmb-sp-edit-response-format" class="text_pole textarea_compact" rows="6">${escapeHtml(tpl.responseFormat || '')}</textarea>
+                </label>
+            </div>
+            <div class="world_entry_form_control">
+                <h4 class="stmb-section-title">${escapeHtml(translate('Lorebook Entry Settings', 'STMemoryBooks_LorebookEntrySettings'))}</h4>
+                <label for="stmb-sp-edit-lb-entry-title-override">
+                    <h5 style="margin: 8px 0 4px 0;">${escapeHtml(translate('Lorebook Entry Title Override', 'STMemoryBooks_LorebookEntryTitleOverride'))}</h5>
+                    <small class="opacity70p">${escapeHtml(translate('Optional. Standard ST macros and required runtime macros are resolved here, and STMB still appends (STMB SidePrompt).', 'STMemoryBooks_LorebookEntryTitleOverrideHelp'))}</small>
+                    <input type="text" id="stmb-sp-edit-lb-entry-title-override" class="text_pole" value="${escapeHtml(lbEntryTitleOverride)}" placeholder="${escapeHtml(translate('Optional title template (e.g., NPC {{npcname}})', 'STMemoryBooks_LorebookEntryTitleOverridePlaceholder'))}">
+                </label>
+                <label for="stmb-sp-edit-lb-entry-keywords">
+                    <h5 style="margin: 8px 0 4px 0;">${escapeHtml(translate('Lorebook Entry Keywords', 'STMemoryBooks_LorebookEntryKeywords'))}</h5>
+                    <small class="opacity70p">${escapeHtml(translate('Optional. If filled in, these keywords are applied to the upserted lorebook entry. You may only use macros already present in Prompt or Response Format.', 'STMemoryBooks_LorebookEntryKeywordsHelp'))}</small>
+                    <input type="text" id="stmb-sp-edit-lb-entry-keywords" class="text_pole" value="${escapeHtml(lbEntryKeywords)}" placeholder="${escapeHtml(translate('Optional comma-separated keywords', 'STMemoryBooks_LorebookEntryKeywordsPlaceholder'))}" title="${escapeHtml(translate('You can only use ST standard macros or macros already defined in Prompt or Response Format.', 'STMemoryBooks_LorebookEntryKeywordsTooltip'))}">
+                </label>
+            </div>
+            <div class="world_entry_form_control">
+                <div class="flex-container" style="gap:12px; flex-wrap: wrap;">
+                    <label>
+                        <h5 style="margin: 0 0 4px 0;">${escapeHtml(translate('Activation Mode', 'STMemoryBooks_ActivationMode'))}</h5>
+                        <select id="stmb-sp-edit-lb-mode" class="text_pole">
+                            <option value="link" ${lbMode === 'link' ? 'selected' : ''}>${escapeHtml(translate('🔗 Vectorized (Default)', 'STMemoryBooks_Vectorized'))}</option>
+                            <option value="green" ${lbMode === 'green' ? 'selected' : ''}>${escapeHtml(translate('🟢 Normal', 'STMemoryBooks_Normal'))}</option>
+                            <option value="blue" ${lbMode === 'blue' ? 'selected' : ''}>${escapeHtml(translate('🔵 Constant', 'STMemoryBooks_Constant'))}</option>
+                        </select>
+                    </label>
+                </div>
+            </div>
+            <div class="world_entry_form_control">
+                <div class="flex-container" style="gap:12px; flex-wrap: wrap;">
+                    <label>
+                        <h5 style="margin: 12px 0 4px 0;">${escapeHtml(translate('Insertion Position:', 'STMemoryBooks_InsertionPosition'))}</h5>
+                        <select id="stmb-sp-edit-lb-position" class="text_pole">
+                            <option value="0" ${lbPosition === 0 ? 'selected' : ''}>${escapeHtml(translate('↑Char', 'STMemoryBooks_CharUp'))}</option>
+                            <option value="1" ${lbPosition === 1 ? 'selected' : ''}>${escapeHtml(translate('↓Char', 'STMemoryBooks_CharDown'))}</option>
+                            <option value="5" ${lbPosition === 5 ? 'selected' : ''}>${escapeHtml(translate('↑EM', 'STMemoryBooks_EMUp'))}</option>
+                            <option value="6" ${lbPosition === 6 ? 'selected' : ''}>${escapeHtml(translate('↓EM', 'STMemoryBooks_EMDown'))}</option>
+                            <option value="2" ${lbPosition === 2 ? 'selected' : ''}>${escapeHtml(translate('↑AN', 'STMemoryBooks_ANUp'))}</option>
+                            <option value="3" ${lbPosition === 3 ? 'selected' : ''}>${escapeHtml(translate('↓AN', 'STMemoryBooks_ANDown'))}</option>
+                            <option value="7" ${lbPosition === 7 ? 'selected' : ''}>${escapeHtml(translate('Outlet', 'STMemoryBooks_Outlet'))}</option>
+                        </select>
+                        <div id="stmb-sp-edit-lb-outlet-name-container" style="display:${lbPosition === 7 ? 'block' : 'none'}; margin-top: 8px;">
+                            <label>
+                                <h5 style="margin: 0 0 4px 0;">${escapeHtml(translate('Outlet Name:', 'STMemoryBooks_OutletName'))}</h5>
+                                <input type="text" id="stmb-sp-edit-lb-outlet-name" class="text_pole" placeholder="${escapeHtml(translate('Outlet name', 'STMemoryBooks_OutletNamePlaceholder'))}" value="${escapeHtml(lb.outletName || '')}">
+                            </label>
+                        </div>
+                    </label>
+                </div>
+                <div class="world_entry_form_control" style="margin-top: 8px;">
+                    <h5>${escapeHtml(translate('Insertion Order:', 'STMemoryBooks_InsertionOrder'))}</h5>
+                    <label class="radio_label">
+                        <input type="radio" name="stmb-sp-edit-lb-order-mode" id="stmb-sp-edit-lb-order-auto" value="auto" ${lbOrderManual ? '' : 'checked'}>
+                        <span>${escapeHtml(translate('Auto (uses memory #)', 'STMemoryBooks_AutoOrder'))}</span>
+                    </label>
+                    <label class="radio_label"">
+                        <input type="radio" name="stmb-sp-edit-lb-order-mode" id="stmb-sp-edit-lb-order-manual" value="manual" ${lbOrderManual ? 'checked' : ''}>
+                        <span>${escapeHtml(translate('Manual', 'STMemoryBooks_ManualOrder'))}</span>
+                    </label>
+                </div>
+                <div class="world_entry_form_control" style="margin-top: 8px;">
+                    <div id="stmb-sp-edit-lb-order-value-container" style="display:${lbOrderManual ? 'block' : 'none'}; margin-top: 8px;">
+                        <label>
+                            <h5>${escapeHtml(translate('Order Value:', 'STMemoryBooks_OrderValue'))}</h5>
+                            <input type="number" id="stmb-sp-edit-lb-order-value" class="text_pole" step="1" value="${lbOrderValue}">
+                        </label>
+                    </div>
+                </div>
+                <div class="world_entry_form_control" style="margin-top: 8px;">
+                    <label class="checkbox_label">
+                        <input type="checkbox" id="stmb-sp-edit-lb-prevent" ${lbPrevent ? 'checked' : ''}>
+                        <span>${escapeHtml(translate('Prevent Recursion', 'STMemoryBooks_PreventRecursion'))}</span>
+                    </label>
+                    <label class="checkbox_label"">
+                        <input type="checkbox" id="stmb-sp-edit-lb-delay" ${lbDelay ? 'checked' : ''}>
+                        <span>${escapeHtml(translate('Delay Until Recursion', 'STMemoryBooks_DelayUntilRecursion'))}</span>
+                    </label>
+                    <label class="checkbox_label">
+                        <input type="checkbox" id="stmb-sp-edit-lb-ignore-budget" ${lbIgnoreBudget ? 'checked' : ''}>
+                        <span>${escapeHtml(translate('Ignore Budget', 'STMemoryBooks_IgnoreBudget'))}</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="world_entry_form_control">
+                <h5>${escapeHtml(translate('Overrides:', 'STMemoryBooks_Overrides'))}</h5>
+                ${overrideHtml}
+            </div>
+        `;
+
+        const editPopup = new Popup(DOMPurify.sanitize(content), POPUP_TYPE.TEXT, '', withGoBackButton({
+            wide: true,
+            large: true,
+            allowVerticalScrolling: true,
+            okButton: translate('Save', 'STMemoryBooks_Save'),
+            cancelButton: translate('Cancel', 'STMemoryBooks_Cancel')
+        }));
+
+        // Attach dynamic handlers before show
+        const attachHandlers = () => {
+            const dlg = editPopup.dlg;
+            if (!dlg) return;
+
+            const cbInterval = dlg.querySelector('#stmb-sp-edit-trg-interval');
+            const intervalCont = dlg.querySelector('#stmb-sp-edit-interval-container');
+            cbInterval?.addEventListener('change', () => {
+                if (intervalCont) intervalCont.style.display = cbInterval.checked ? 'block' : 'none';
+                if (cbInterval.checked) dlg.querySelector('#stmb-sp-edit-interval')?.focus();
+            });
+
+            const cbOverride = dlg.querySelector('#stmb-sp-edit-override-enabled');
+            const overrideCont = dlg.querySelector('#stmb-sp-edit-override-container');
+            cbOverride?.addEventListener('change', () => {
+                if (overrideCont) overrideCont.style.display = cbOverride.checked ? 'block' : 'none';
+            });
+
+            // Lorebook order mode visibility
+            const orderAuto = dlg.querySelector('#stmb-sp-edit-lb-order-auto');
+            const orderManual = dlg.querySelector('#stmb-sp-edit-lb-order-manual');
+            const orderValCont = dlg.querySelector('#stmb-sp-edit-lb-order-value-container');
+            const syncOrderVisibility = () => {
+                if (orderValCont) orderValCont.style.display = orderManual?.checked ? 'block' : 'none';
+            };
+            orderAuto?.addEventListener('change', syncOrderVisibility);
+            orderManual?.addEventListener('change', syncOrderVisibility);
+
+            // Toggle Outlet Name based on position
+            const posSel = dlg.querySelector('#stmb-sp-edit-lb-position');
+            const outletCont = dlg.querySelector('#stmb-sp-edit-lb-outlet-name-container');
+            posSel?.addEventListener('change', () => {
+                if (outletCont) outletCont.style.display = posSel.value === '7' ? 'block' : 'none';
+            });
+        };
+
+        const showPromise = editPopup.show();
+        attachHandlers();
+        const result = await showPromise;
+        if (result === POPUP_RESULT.AFFIRMATIVE) {
+            const dlg = editPopup.dlg;
+            const newName = dlg.querySelector('#stmb-sp-edit-name')?.value.trim() || '';
+            const newPrompt = dlg.querySelector('#stmb-sp-edit-prompt')?.value.trim() || '';
+            const newResponseFormat = dlg.querySelector('#stmb-sp-edit-response-format')?.value.trim() || '';
+            const lorebookEntryTitleOverride = dlg.querySelector('#stmb-sp-edit-lb-entry-title-override')?.value.trim() || '';
+            const lorebookEntryKeywords = dlg.querySelector('#stmb-sp-edit-lb-entry-keywords')?.value.trim() || '';
+            const lorebookTargetSelect = dlg.querySelector('#stmb-sp-edit-lb-target-select');
+            const selectedLorebookTarget = lorebookTargetSelect?.value || '__memory__';
+            const originalLorebookTarget = lorebookTargetSelect?.dataset?.originalValue || '__memory__';
+            const newEnabled = !!dlg.querySelector('#stmb-sp-edit-enabled')?.checked;
+
+            if (!newPrompt) {
+                toastr.error(translate('Prompt cannot be empty', 'STMemoryBooks_PromptCannotBeEmpty'), translate('STMemoryBooks', 'index.toast.title'));
+                return;
+            }
+            if (!newName) {
+                toastr.info(translate('Name was empty. Keeping previous name.', 'STMemoryBooks_NameEmptyKeepPrevious'), translate('STMemoryBooks', 'index.toast.title'));
+            }
+            if (!validateKeywordsMacroConfig({ prompt: newPrompt, responseFormat: newResponseFormat, keywordsTemplate: lorebookEntryKeywords }).ok) {
+                return;
+            }
+
+            const effectiveName = newName || tpl.name;
+
+            // Triggers
+            const triggers = {};
+            const intervalOn = !!dlg.querySelector('#stmb-sp-edit-trg-interval')?.checked;
+            const afterOn = !!dlg.querySelector('#stmb-sp-edit-trg-aftermem')?.checked;
+            const manualOn = !!dlg.querySelector('#stmb-sp-edit-trg-manual')?.checked;
+
+            const validation = validateRuntimeMacroTriggerConfig({
+                name: effectiveName,
+                prompt: newPrompt,
+                responseFormat: newResponseFormat,
+                titleOverride: lorebookEntryTitleOverride,
+                intervalOn,
+                afterOn,
+            });
+            const forceManual = validation.runtimeMacros.length > 0;
+            const allowAutoTriggers = validation.runtimeMacros.length === 0;
+
+            if (intervalOn && allowAutoTriggers) {
+                const intervalRaw = parseInt(dlg.querySelector('#stmb-sp-edit-interval')?.value ?? '50', 10);
+                const vis = Math.max(1, isNaN(intervalRaw) ? 50 : intervalRaw);
+                triggers.onInterval = { visibleMessages: vis };
+            }
+            if (afterOn && allowAutoTriggers) {
+                triggers.onAfterMemory = { enabled: true };
+            }
+            if (manualOn || forceManual) {
+                triggers.commands = ['sideprompt'];
+            }
+
+            // Overrides in settings
+            const settings = { ...(tpl.settings || {}) };
+            const overrideEnabled2 = !!dlg.querySelector('#stmb-sp-edit-override-enabled')?.checked;
+            settings.overrideProfileEnabled = overrideEnabled2;
+            if (overrideEnabled2) {
+                const oidx = parseInt(dlg.querySelector('#stmb-sp-edit-override-index')?.value ?? '', 10);
+                if (!isNaN(oidx)) settings.overrideProfileIndex = oidx;
+            } else {
+                delete settings.overrideProfileIndex;
+            }
+
+            // Lorebook settings
+            const lbModeSel = dlg.querySelector('#stmb-sp-edit-lb-mode')?.value || 'link';
+            const lbPosRaw = parseInt(dlg.querySelector('#stmb-sp-edit-lb-position')?.value ?? '0', 10);
+            const lbOrderManual2 = !!dlg.querySelector('#stmb-sp-edit-lb-order-manual')?.checked;
+            const lbOrderValRaw = parseInt(dlg.querySelector('#stmb-sp-edit-lb-order-value')?.value ?? '100', 10);
+            const lbPrevent2 = !!dlg.querySelector('#stmb-sp-edit-lb-prevent')?.checked;
+            const lbDelay2 = !!dlg.querySelector('#stmb-sp-edit-lb-delay')?.checked;
+            const lbIgnoreBudget2 = !!dlg.querySelector('#stmb-sp-edit-lb-ignore-budget')?.checked;
+            const outletNameVal = lbPosRaw === 7 ? (dlg.querySelector('#stmb-sp-edit-lb-outlet-name')?.value?.trim() || '') : '';
+
+            const prevCountRaw = parseInt(dlg.querySelector('#stmb-sp-edit-prev-mem-count')?.value ?? '0', 10);
+settings.previousMemoriesCount = Number.isFinite(prevCountRaw) && prevCountRaw > 0 ? Math.min(prevCountRaw, 7) : 0;
+
+            let targetLorebookName = String(lb.targetLorebookName || '');
+            if (selectedLorebookTarget !== originalLorebookTarget) {
+                const targetScope = await promptLorebookTargetSaveScope();
+                if (!targetScope) return;
+
+                const targetName = selectedLorebookTarget === '__memory__' ? '' : selectedLorebookTarget;
+                if (targetScope === 'chat') {
+                    setChatSidePromptLorebookOverride(tpl.key, selectedLorebookTarget);
+                } else {
+                    targetLorebookName = targetName;
+                    setChatSidePromptLorebookOverride(tpl.key, '');
+                }
+            }
+
+            settings.lorebook = {
+                constVectMode: ['link', 'green', 'blue'].includes(lbModeSel) ? lbModeSel : 'link',
+                position: Number.isFinite(lbPosRaw) ? lbPosRaw : 0,
+                orderMode: lbOrderManual2 ? 'manual' : 'auto',
+                orderValue: Number.isFinite(lbOrderValRaw) ? lbOrderValRaw : 100,
+                preventRecursion: lbPrevent2,
+                delayUntilRecursion: lbDelay2,
+                ignoreBudget: lbIgnoreBudget2,
+                ...(lbPosRaw === 7 && outletNameVal ? { outletName: outletNameVal } : {}),
+                ...(lorebookEntryTitleOverride ? { entryTitleOverride: lorebookEntryTitleOverride } : {}),
+                ...(lorebookEntryKeywords ? { entryKeywords: lorebookEntryKeywords } : {}),
+                ...(targetLorebookName ? { targetLorebookName } : {}),
+            };
+
+            await upsertTemplate({
+                key: tpl.key,
+                name: newName,
+                enabled: newEnabled,
+                prompt: newPrompt,
+                responseFormat: newResponseFormat,
+                settings,
+                triggers,
+            });
+            toastr.success(tr('STMemoryBooks_Toast_SidePromptUpdated', 'SidePrompt "{{name}}" updated.', { name: newName || tpl.name }), translate('STMemoryBooks', 'index.toast.title'));
+            window.dispatchEvent(new CustomEvent('stmb-sideprompts-updated'));
+            await refreshList(parentPopup, tpl.key);
+        }
+    } catch (err) {
+        console.error('STMemoryBooks: Error editing side prompt:', err);
+        toastr.error(translate('Failed to edit SidePrompt', 'STMemoryBooks_FailedToEditSidePrompt'), translate('STMemoryBooks', 'index.toast.title'));
+    }
+}
+
+/**
+ * Open create-new template dialog (triggers-based)
+ * @param {Popup} parentPopup
+ */
+async function openNewTemplate(parentPopup) {
+    // Default triggers: manual enabled; others off
+    const profiles = extension_settings?.STMemoryBooks?.profiles || [];
+    let idx = Number(extension_settings?.STMemoryBooks?.defaultProfile ?? 0);
+    if (!(idx >= 0 && idx < profiles.length)) idx = 0;
+
+    const options = profiles.map((p, i) =>
+        `<option value="${i}" ${i === idx ? 'selected' : ''}>${escapeHtml(p?.name || ('Profile ' + (i + 1)))}</option>`
+    ).join('');
+
+    const content = `
+        <h3>${escapeHtml(translate('New Side Prompt', 'STMemoryBooks_NewSidePrompt'))}</h3>
+        <div class="world_entry_form_control">
+            <label for="stmb-sp-new-name">
+                <h4>${escapeHtml(translate('Name:', 'STMemoryBooks_Name'))}</h4>
+                <input type="text" id="stmb-sp-new-name" class="text_pole" placeholder="${escapeHtml(translate('My Side Prompt', 'STMemoryBooks_MySidePromptPlaceholder'))}" />
+            </label>
+        </div>
+        <div class="world_entry_form_control">
+            <label class="checkbox_label">
+                <input type="checkbox" id="stmb-sp-new-enabled">
+                <span>${escapeHtml(translate('Enabled', 'STMemoryBooks_Enabled'))}</span>
+            </label>
+        </div>
+        <div class="world_entry_form_control">
+            <h4>${escapeHtml(translate('Triggers:', 'STMemoryBooks_Triggers'))}</h4>
+            <label class="checkbox_label">
+                <input type="checkbox" id="stmb-sp-new-trg-interval">
+                <span>${escapeHtml(translate('Run on visible message interval', 'STMemoryBooks_RunOnVisibleMessageInterval'))}</span>
+            </label>
+            <div id="stmb-sp-new-interval-container" class="displayNone" style="margin-left:28px;">
+                <label for="stmb-sp-new-interval">
+                    <h4 style="margin: 0 0 4px 0;">${escapeHtml(translate('Interval (visible messages):', 'STMemoryBooks_IntervalVisibleMessages'))}</h4>
+                    <input type="number" id="stmb-sp-new-interval" class="text_pole" min="1" step="1" value="50">
+                </label>
+            </div>
+            <label class="checkbox_label">
+                <input type="checkbox" id="stmb-sp-new-trg-aftermem">
+                <span>${escapeHtml(translate('Run automatically after memory', 'STMemoryBooks_RunAutomaticallyAfterMemory'))}</span>
+            </label>
+            <label class="checkbox_label">
+                <input type="checkbox" id="stmb-sp-new-trg-manual" checked>
+                <span>${escapeHtml(translate('Allow manual run via /sideprompt', 'STMemoryBooks_AllowManualRunViaSideprompt'))}</span>
+            </label>
+        </div>
+        <div class="world_entry_form_control">
+            <label for="stmb-sp-new-prompt">
+                <h4>${escapeHtml(translate('Prompt:', 'STMemoryBooks_PromptTitle'))}</h4>
+                <i class="editor_maximize fa-solid fa-maximize right_menu_button" data-for="stmb-sp-new-prompt" title="Expand the editor" data-i18n="[title]STMemoryBooks_ExpandEditor"></i>
+                <textarea id="stmb-sp-new-prompt" class="text_pole textarea_compact" rows="8" placeholder="${escapeHtml(translate('Enter your prompt here...', 'STMemoryBooks_EnterPromptPlaceholder'))}"></textarea>
+            </label>
+        </div>
+        <div class="world_entry_form_control">
+            <label for="stmb-sp-new-response-format">
+                <h4>${escapeHtml(translate('Response Format (optional):', 'STMemoryBooks_ResponseFormatOptional'))}</h4>
+                <i class="editor_maximize fa-solid fa-maximize right_menu_button" data-for="stmb-sp-new-response-format" title="Expand the editor" data-i18n="[title]STMemoryBooks_ExpandEditor"></i>
+                <textarea id="stmb-sp-new-response-format" class="text_pole textarea_compact" rows="6" placeholder="${escapeHtml(translate('Optional response format', 'STMemoryBooks_ResponseFormatPlaceholder'))}"></textarea>
+            </label>
+        </div>
+        ${buildLorebookTargetBlock({ idPrefix: 'stmb-sp-new-lb' })}
+        <div class="world_entry_form_control">
+            <h4>${escapeHtml(translate('Lorebook Entry Settings', 'STMemoryBooks_LorebookEntrySettings'))}:</h4>
+            <label for="stmb-sp-new-lb-entry-title-override">
+                <h4 style="margin: 8px 0 4px 0;">${escapeHtml(translate('Lorebook Entry Title Override', 'STMemoryBooks_LorebookEntryTitleOverride'))}</h4>
+                <input type="text" id="stmb-sp-new-lb-entry-title-override" class="text_pole" placeholder="${escapeHtml(translate('Optional title template (e.g., NPC {{npcname}})', 'STMemoryBooks_LorebookEntryTitleOverridePlaceholder'))}">
+            </label>
+            <small class="opacity70p">${escapeHtml(translate('Optional. Standard ST macros and required runtime macros are resolved here, and STMB still appends (STMB SidePrompt).', 'STMemoryBooks_LorebookEntryTitleOverrideHelp'))}</small>
+            <label for="stmb-sp-new-lb-entry-keywords">
+                <h4 style="margin: 8px 0 4px 0;">${escapeHtml(translate('Lorebook Entry Keywords', 'STMemoryBooks_LorebookEntryKeywords'))}</h4>
+                <input type="text" id="stmb-sp-new-lb-entry-keywords" class="text_pole" placeholder="${escapeHtml(translate('Optional comma-separated keywords', 'STMemoryBooks_LorebookEntryKeywordsPlaceholder'))}" title="${escapeHtml(translate('You can only use ST standard macros or macros already defined in Prompt or Response Format.', 'STMemoryBooks_LorebookEntryKeywordsTooltip'))}">
+            </label>
+            <small class="opacity70p">${escapeHtml(translate('Optional. If filled in, these keywords are applied to the upserted lorebook entry. You may only use macros already present in Prompt or Response Format.', 'STMemoryBooks_LorebookEntryKeywordsHelp'))}</small>
+            <div class="flex-container" style="gap:12px; flex-wrap: wrap;">
+                <label>
+                    <h4 style="margin: 0 0 4px 0;">${escapeHtml(translate('Activation Mode', 'STMemoryBooks_ActivationMode'))}:</h4>
+                    <select id="stmb-sp-new-lb-mode" class="text_pole">
+                        <option value="link" selected>${escapeHtml(translate('🔗 Vectorized (Default)', 'STMemoryBooks_Vectorized'))}</option>
+                        <option value="green">${escapeHtml(translate('🟢 Normal', 'STMemoryBooks_Normal'))}</option>
+                        <option value="blue">${escapeHtml(translate('🔵 Constant', 'STMemoryBooks_Constant'))}</option>
+                    </select>
+                </label>
+                <label>
+                    <h4 style="margin: 0 0 4px 0;">${escapeHtml(translate('Insertion Position:', 'STMemoryBooks_InsertionPosition'))}</h4>
+                    <select id="stmb-sp-new-lb-position" class="text_pole">
+                        <option value="0" selected>${escapeHtml(translate('↑Char', 'STMemoryBooks_CharUp'))}</option>
+                        <option value="1">${escapeHtml(translate('↓Char', 'STMemoryBooks_CharDown'))}</option>
+                        <option value="2">${escapeHtml(translate('↑AN', 'STMemoryBooks_ANUp'))}</option>
+                        <option value="3">${escapeHtml(translate('↓AN', 'STMemoryBooks_ANDown'))}</option>
+                        <option value="4">${escapeHtml(translate('↑EM', 'STMemoryBooks_EMUp'))}</option>
+                        <option value="5">${escapeHtml(translate('↓EM', 'STMemoryBooks_EMDown'))}</option>
+                        <option value="7">${escapeHtml(translate('Outlet', 'STMemoryBooks_Outlet'))}</option>
+                    </select>
+                    <div id="stmb-sp-new-lb-outlet-name-container" class="displayNone" style="margin-top: 8px;">
+                        <label>
+                            <h4 style="margin: 0 0 4px 0;">${escapeHtml(translate('Outlet Name:', 'STMemoryBooks_OutletName'))}</h4>
+                            <input type="text" id="stmb-sp-new-lb-outlet-name" class="text_pole" placeholder="${escapeHtml(translate('Outlet name (e.g., ENDING)', 'STMemoryBooks_OutletNamePlaceholder'))}">
+                        </label>
+                    </div>
+                </label>
+            </div>
+            <div class="world_entry_form_control" style="margin-top: 8px;">
+                <h4>${escapeHtml(translate('Insertion Order:', 'STMemoryBooks_InsertionOrder'))}</h4>
+                <label class="radio_label">
+                    <input type="radio" name="stmb-sp-new-lb-order-mode" id="stmb-sp-new-lb-order-auto" value="auto" checked>
+                    <span>${escapeHtml(translate('Auto (uses memory #)', 'STMemoryBooks_AutoOrder'))}</span>
+                </label>
+                <label class="radio_label">
+                    <input type="radio" name="stmb-sp-new-lb-order-mode" id="stmb-sp-new-lb-order-manual" value="manual">
+                    <span>${escapeHtml(translate('Manual', 'STMemoryBooks_ManualOrder'))}</span>
+                </label>
+                <div id="stmb-sp-new-lb-order-value-container" style="display:none; margin-top: 8px;">
+                    <label>
+                        <h4>${escapeHtml(translate('Order Value:', 'STMemoryBooks_OrderValue'))}</h4>
+                        <input type="number" id="stmb-sp-new-lb-order-value" class="text_pole" step="1" value="100">
+                    </label>
+                </div>
+            </div>
+            <div class="world_entry_form_control" style="margin-top: 8px;">
+                <label class="checkbox_label">
+                    <input type="checkbox" id="stmb-sp-new-lb-prevent" checked>
+                    <span>${escapeHtml(translate('Prevent Recursion', 'STMemoryBooks_PreventRecursion'))}</span>
+                </label>
+                <label class="checkbox_label">
+                    <input type="checkbox" id="stmb-sp-new-lb-delay">
+                    <span>${escapeHtml(translate('Delay Until Recursion', 'STMemoryBooks_DelayUntilRecursion'))}</span>
+                </label>
+                <label class="checkbox_label">
+                    <input type="checkbox" id="stmb-sp-new-lb-ignore-budget">
+                    <span>${escapeHtml(translate('Ignore Budget', 'STMemoryBooks_IgnoreBudget'))}</span>
+                </label>
+            </div>
+        </div>
+
+        <div class="world_entry_form_control">
+            <label for="stmb-sp-new-prev-mem-count">
+                <h4>${escapeHtml(translate('Previous memories for context:', 'STMemoryBooks_PreviousMemoriesForContext'))}</h4>
+<input type="number" id="stmb-sp-new-prev-mem-count" class="text_pole" min="0" max="7" step="1" value="0">
+            </label>
+            <small class="opacity70p">${escapeHtml(translate('Number of previous memory entries to include before scene text (0 = none).', 'STMemoryBooks_PreviousMemoriesHelp'))}</small>
+        </div>
+
+        <div class="world_entry_form_control">
+            <h4>${escapeHtml(translate('Overrides:', 'STMemoryBooks_Overrides'))}</h4>
+            <div class="world_entry_form_control">
+                <label class="checkbox_label">
+                    <input type="checkbox" id="stmb-sp-new-override-enabled">
+                    <span>${escapeHtml(translate('Override default memory profile', 'STMemoryBooks_OverrideDefaultMemoryProfile'))}</span>
+                </label>
+            </div>
+            <div class="world_entry_form_control" id="stmb-sp-new-override-container" style="display: none;">
+                <label for="stmb-sp-new-override-index">
+                    <h4>${escapeHtml(translate('Connection Profile:', 'STMemoryBooks_ConnectionProfile'))}</h4>
+                    <select id="stmb-sp-new-override-index" class="text_pole">
+                        ${options}
+                    </select>
+                </label>
+            </div>
+        </div>
+    `;
+
+    const newPopup = new Popup(DOMPurify.sanitize(content), POPUP_TYPE.TEXT, '', withGoBackButton({
+        wide: true,
+        large: true,
+        allowVerticalScrolling: true,
+        okButton: translate('Create', 'STMemoryBooks_Create'),
+        cancelButton: translate('Cancel', 'STMemoryBooks_Cancel')
+    }));
+
+    const attachHandlers = () => {
+        const dlg = newPopup.dlg;
+
+        const cbInterval = dlg.querySelector('#stmb-sp-new-trg-interval');
+        const intervalCont = dlg.querySelector('#stmb-sp-new-interval-container');
+        cbInterval?.addEventListener('change', () => {
+            if (intervalCont) intervalCont.style.display = cbInterval.checked ? 'block' : 'none';
+            if (cbInterval.checked) dlg.querySelector('#stmb-sp-new-interval')?.focus();
+        });
+
+        const cbOverride = dlg.querySelector('#stmb-sp-new-override-enabled');
+        const overrideCont = dlg.querySelector('#stmb-sp-new-override-container');
+        cbOverride?.addEventListener('change', () => {
+            if (overrideCont) overrideCont.style.display = cbOverride.checked ? 'block' : 'none';
+        });
+
+        // Lorebook order mode visibility
+        const orderAuto = dlg.querySelector('#stmb-sp-new-lb-order-auto');
+        const orderManual = dlg.querySelector('#stmb-sp-new-lb-order-manual');
+        const orderValCont = dlg.querySelector('#stmb-sp-new-lb-order-value-container');
+        const syncOrderVisibility = () => {
+            if (orderValCont) orderValCont.style.display = orderManual?.checked ? 'block' : 'none';
+        };
+        orderAuto?.addEventListener('change', syncOrderVisibility);
+        orderManual?.addEventListener('change', syncOrderVisibility);
+
+        // Toggle Outlet Name based on position
+        const posSelNew = dlg.querySelector('#stmb-sp-new-lb-position');
+        const outletContNew = dlg.querySelector('#stmb-sp-new-lb-outlet-name-container');
+        posSelNew?.addEventListener('change', () => {
+            if (outletContNew) outletContNew.classList.toggle('displayNone', posSelNew.value !== '7');
+        });
+    };
+
+    const showPromise = newPopup.show();
+    attachHandlers();
+    const result = await showPromise;
+    if (result === POPUP_RESULT.AFFIRMATIVE) {
+        const dlg = newPopup.dlg;
+        const name = dlg.querySelector('#stmb-sp-new-name')?.value.trim() || '';
+        const enabled = !!dlg.querySelector('#stmb-sp-new-enabled')?.checked;
+        const prompt = dlg.querySelector('#stmb-sp-new-prompt')?.value.trim() || '';
+        const responseFormat = dlg.querySelector('#stmb-sp-new-response-format')?.value.trim() || '';
+        const lorebookEntryTitleOverride = dlg.querySelector('#stmb-sp-new-lb-entry-title-override')?.value.trim() || '';
+        const lorebookEntryKeywords = dlg.querySelector('#stmb-sp-new-lb-entry-keywords')?.value.trim() || '';
+        const lorebookTargetSelect = dlg.querySelector('#stmb-sp-new-lb-target-select');
+        const selectedLorebookTarget = lorebookTargetSelect?.value || '__memory__';
+        const originalLorebookTarget = lorebookTargetSelect?.dataset?.originalValue || '__memory__';
+
+        if (!prompt) {
+            toastr.error(translate('Prompt cannot be empty', 'STMemoryBooks_PromptCannotBeEmpty'), translate('STMemoryBooks', 'index.toast.title'));
+            return;
+        }
+        if (!name) {
+            toastr.info(tr('STMemoryBooks_SidePrompts_NoNameProvidedUsingUntitled', 'No name provided. Using "{{name}}".', { name: translate('Untitled Side Prompt', 'STMemoryBooks_UntitledSidePrompt') }), translate('STMemoryBooks', 'index.toast.title'));
+        }
+        if (!validateKeywordsMacroConfig({ prompt, responseFormat, keywordsTemplate: lorebookEntryKeywords }).ok) {
+            return;
+        }
+
+        const effectiveName = name || translate('Untitled Side Prompt', 'STMemoryBooks_UntitledSidePrompt');
+
+        // Build triggers
+        const triggers = {};
+        const intervalOn = !!dlg.querySelector('#stmb-sp-new-trg-interval')?.checked;
+        const afterOn = !!dlg.querySelector('#stmb-sp-new-trg-aftermem')?.checked;
+        const manualOn = !!dlg.querySelector('#stmb-sp-new-trg-manual')?.checked;
+
+        const validation = validateRuntimeMacroTriggerConfig({
+            name: effectiveName,
+            prompt,
+            responseFormat,
+            titleOverride: lorebookEntryTitleOverride,
+            intervalOn,
+            afterOn,
+        });
+        const forceManual = validation.runtimeMacros.length > 0;
+        const allowAutoTriggers = validation.runtimeMacros.length === 0;
+
+        if (intervalOn && allowAutoTriggers) {
+            const intervalRaw = parseInt(dlg.querySelector('#stmb-sp-new-interval')?.value ?? '50', 10);
+            const vis = Math.max(1, isNaN(intervalRaw) ? 50 : intervalRaw);
+            triggers.onInterval = { visibleMessages: vis };
+        }
+        if (afterOn && allowAutoTriggers) {
+            triggers.onAfterMemory = { enabled: true };
+        }
+        if (manualOn || forceManual) {
+            triggers.commands = ['sideprompt'];
+        }
+
+        // Settings - overrides
+        const settings = {};
+        const overrideEnabled = !!dlg.querySelector('#stmb-sp-new-override-enabled')?.checked;
+        settings.overrideProfileEnabled = overrideEnabled;
+        if (overrideEnabled) {
+            const oidx = parseInt(dlg.querySelector('#stmb-sp-new-override-index')?.value ?? '', 10);
+            if (!isNaN(oidx)) settings.overrideProfileIndex = oidx;
+        }
+
+        // Settings - lorebook
+        const lbModeSel = dlg.querySelector('#stmb-sp-new-lb-mode')?.value || 'link';
+        const lbPosRaw = parseInt(dlg.querySelector('#stmb-sp-new-lb-position')?.value ?? '0', 10);
+        const lbOrderManual2 = !!dlg.querySelector('#stmb-sp-new-lb-order-manual')?.checked;
+        const lbOrderValRaw = parseInt(dlg.querySelector('#stmb-sp-new-lb-order-value')?.value ?? '100', 10);
+        const lbPrevent2 = !!dlg.querySelector('#stmb-sp-new-lb-prevent')?.checked;
+        const lbDelay2 = !!dlg.querySelector('#stmb-sp-new-lb-delay')?.checked;
+        const lbIgnoreBudget2 = !!dlg.querySelector('#stmb-sp-new-lb-ignore-budget')?.checked;
+        const outletNameVal = lbPosRaw === 7 ? (dlg.querySelector('#stmb-sp-new-lb-outlet-name')?.value?.trim() || '') : '';
+
+        const prevCountRaw = parseInt(dlg.querySelector('#stmb-sp-new-prev-mem-count')?.value ?? '0', 10);
+settings.previousMemoriesCount = Number.isFinite(prevCountRaw) && prevCountRaw > 0 ? Math.min(prevCountRaw, 7) : 0;
+
+        let targetScope = null;
+        const targetName = selectedLorebookTarget === '__memory__' ? '' : selectedLorebookTarget;
+        if (selectedLorebookTarget !== originalLorebookTarget) {
+            targetScope = await promptLorebookTargetSaveScope();
+            if (!targetScope) return;
+        }
+
+        settings.lorebook = {
+            constVectMode: ['link', 'green', 'blue'].includes(lbModeSel) ? lbModeSel : 'link',
+            position: Number.isFinite(lbPosRaw) ? lbPosRaw : 0,
+            orderMode: lbOrderManual2 ? 'manual' : 'auto',
+            orderValue: Number.isFinite(lbOrderValRaw) ? lbOrderValRaw : 100,
+            preventRecursion: lbPrevent2,
+            delayUntilRecursion: lbDelay2,
+            ignoreBudget: lbIgnoreBudget2,
+            ...(lbPosRaw === 7 && outletNameVal ? { outletName: outletNameVal } : {}),
+            ...(lorebookEntryTitleOverride ? { entryTitleOverride: lorebookEntryTitleOverride } : {}),
+            ...(lorebookEntryKeywords ? { entryKeywords: lorebookEntryKeywords } : {}),
+            ...(targetScope === 'template' && targetName ? { targetLorebookName: targetName } : {}),
+        };
+
+        try {
+            const key = await upsertTemplate({ name, enabled, prompt, responseFormat, settings, triggers });
+            if (targetScope === 'chat') {
+                setChatSidePromptLorebookOverride(key, selectedLorebookTarget);
+            }
+            toastr.success(translate('SidePrompt created', 'STMemoryBooks_SidePromptCreated'), translate('STMemoryBooks', 'index.toast.title'));
+            await refreshList(parentPopup, key);
+        } catch (err) {
+            console.error('STMemoryBooks: Error creating side prompt:', err);
+            toastr.error(translate('Failed to create SidePrompt', 'STMemoryBooks_FailedToCreateSidePrompt'), translate('STMemoryBooks', 'index.toast.title'));
+        }
+    }
+}
+
+/**
+ * Export templates to JSON and download
+ */
+async function exportTemplates() {
+    try {
+        const json = await exportSidePromptsJSON();
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'stmb-side-prompts.json';
+        a.click();
+        URL.revokeObjectURL(url);
+        toastr.success(translate('Side prompts exported successfully', 'STMemoryBooks_SidePromptsExported'), translate('STMemoryBooks', 'index.toast.title'));
+    } catch (err) {
+        console.error('STMemoryBooks: Error exporting side prompts:', err);
+        toastr.error(translate('Failed to export side prompts', 'STMemoryBooks_FailedToExportSidePrompts'), translate('STMemoryBooks', 'index.toast.title'));
+    }
+}
+
+/**
+ * Import templates from JSON text
+ * @param {Event} event
+ * @param {Popup} parentPopup
+ */
+async function importTemplates(event, parentPopup) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+        const text = await file.text();
+        const res = await importSidePromptsJSON(text);
+        if (res && typeof res === 'object') {
+            const { added = 0, renamed = 0, setsAdded = 0, setsRenamed = 0, strippedDetails = [] } = res;
+            const detail = renamed > 0 ? tr('STMemoryBooks_ImportedSidePromptsRenamedDetail', ' ({{count}} renamed due to key conflicts)', { count: renamed }) : '';
+            const setDetail = setsAdded > 0
+                ? tr('STMemoryBooks_ImportedSidePromptSetsDetail', '; sets: {{setsAdded}} added{{setsDetail}}', {
+                    setsAdded,
+                    setsDetail: setsRenamed > 0 ? tr('STMemoryBooks_ImportedSidePromptsRenamedDetail', ' ({{count}} renamed due to key conflicts)', { count: setsRenamed }) : '',
+                })
+                : '';
+            toastr.success(tr('STMemoryBooks_ImportedSidePromptsDetail', 'Imported side prompts: {{added}} added{{detail}}{{setDetail}}', { added, detail, setDetail }), translate('STMemoryBooks', 'index.toast.title'));
+            showRuntimeMacroImportNormalizationToast(strippedDetails);
+        } else {
+            toastr.success(translate('Imported side prompts', 'STMemoryBooks_ImportedSidePrompts'), translate('STMemoryBooks', 'index.toast.title'));
+        }
+        await refreshList(parentPopup);
+        await refreshSetControls(parentPopup);
+    } catch (err) {
+        console.error('STMemoryBooks: Error importing side prompts:', err);
+        toastr.error(tr('STMemoryBooks_FailedToImportSidePrompts', 'Failed to import: {{message}}', { message: err?.message || 'Unknown error' }), translate('STMemoryBooks', 'index.toast.title'));
+    }
+}
+
+/**
+ * Show the Side Prompts popup (list view with Edit/Copy/Trash and New/Export/Import)
+ */
+export async function showSidePromptsPopup() {
+    try {
+        let content = '<h3 data-i18n="STMemoryBooks_SidePrompts_Title">🎡 Trackers & Side Prompts</h3>';
+        content += '<div class="world_entry_form_control">';
+        content += '<p class="opacity70p" data-i18n="STMemoryBooks_SidePrompts_Desc">Create and manage side prompts for trackers and other behind-the-scenes functions.</p>';
+        content += '</div>';
+
+        content += '<div id="stmb-sp-set-controls"></div>';
+
+        // Search/filter box
+        content += '<div class="world_entry_form_control">';
+        content += '<input type="text" id="stmb-sp-search" class="text_pole" data-i18n="[placeholder]STMemoryBooks_SearchSidePrompts;[aria-label]STMemoryBooks_SearchSidePrompts" placeholder="Search side prompts..." aria-label="Search side prompts" />';
+        content += '</div>';
+
+        // Global setting: max concurrent side prompts
+        content += '<div class="world_entry_form_control">';
+        content += `<label for="stmb-sp-max-concurrent"><h4>${escapeHtml(translate('How many concurrent prompts to run at once', 'STMemoryBooks_SidePrompts_MaxConcurrentLabel'))}</h4></label>`;
+        content += '<input type="number" id="stmb-sp-max-concurrent" class="text_pole" min="1" max="5" step="1" value="2">';
+        content += `<small class="opacity70p">${escapeHtml(translate('Range 1–5. Defaults to 2.', 'STMemoryBooks_SidePrompts_MaxConcurrentHelp'))}</small>`;
+        content += '</div>';
+
+        // List container
+        content += '<div id="stmb-sp-list" class="padding10 marginBot10" style="max-height: 400px; overflow-y: auto;"></div>';
+
+        // Action buttons
+        content += '<div class="buttons_block justifyCenter gap10px whitespacenowrap">';
+        content += `<button id="stmb-sp-new" class="menu_button whitespacenowrap">${escapeHtml(translate('New', 'STMemoryBooks_SidePrompts_New'))}</button>`;
+        content += `<button id="stmb-sp-review-entries" class="menu_button whitespacenowrap">${escapeHtml(translate('Compact / Review', 'STMemoryBooks_Clip_CompactReview'))}</button>`;
+        content += `<button id="stmb-sp-export" class="menu_button whitespacenowrap">${escapeHtml(translate('Export JSON', 'STMemoryBooks_SidePrompts_ExportJSON'))}</button>`;
+        content += `<button id="stmb-sp-import" class="menu_button whitespacenowrap">${escapeHtml(translate('Import JSON', 'STMemoryBooks_SidePrompts_ImportJSON'))}</button>`;
+        content += `<button id="stmb-sp-recreate-builtins" class="menu_button whitespacenowrap">${escapeHtml(translate('♻️ Recreate Built-in Side Prompts', 'STMemoryBooks_SidePrompts_RecreateBuiltIns'))}</button>`;
+        content += '</div>';
+
+        // Hidden file input for import
+        content += '<input type="file" id="stmb-sp-import-file" accept=".json" style="display: none;" />';
+
+        const popup = new Popup(DOMPurify.sanitize(content), POPUP_TYPE.TEXT, '', withGoBackButton({
+            wide: true,
+            large: true,
+            allowVerticalScrolling: true,
+            okButton: false,
+            cancelButton: translate('Close', 'STMemoryBooks_Close')
+        }));
+
+        // Attach handlers before show
+        const attachHandlers = () => {
+            const dlg = popup.dlg;
+            if (!dlg) return;
+
+            // Max concurrent control
+            const spMaxInput = dlg.querySelector('#stmb-sp-max-concurrent');
+            if (spMaxInput) {
+                const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
+                const current = clamp(Number(extension_settings?.STMemoryBooks?.moduleSettings?.sidePromptsMaxConcurrent ?? 2), 1, 5);
+                spMaxInput.value = String(current);
+                const persist = () => {
+                    const raw = parseInt(spMaxInput.value, 10);
+                    const val = clamp(isNaN(raw) ? 2 : raw, 1, 5);
+                    spMaxInput.value = String(val);
+                    // Ensure settings objects exist
+                    if (!extension_settings.STMemoryBooks) extension_settings.STMemoryBooks = { moduleSettings: {} };
+                    if (!extension_settings.STMemoryBooks.moduleSettings) extension_settings.STMemoryBooks.moduleSettings = {};
+                    extension_settings.STMemoryBooks.moduleSettings.sidePromptsMaxConcurrent = val;
+                    saveSettingsDebounced();
+                };
+                spMaxInput.addEventListener('change', persist);
+            }
+
+            // Search
+            dlg.querySelector('#stmb-sp-search')?.addEventListener('input', () => refreshList(popup));
+
+            refreshSetControls(popup);
+
+            // Buttons
+            dlg.querySelector('#stmb-sp-new')?.addEventListener('click', async () => {
+                await openNewTemplate(popup);
+            });
+            dlg.querySelector('#stmb-sp-review-entries')?.addEventListener('click', async () => {
+                await showStmbEntryReviewPopup({ showGoBack: true });
+            });
+            dlg.querySelector('#stmb-sp-export')?.addEventListener('click', async () => {
+                await exportTemplates();
+            });
+            dlg.querySelector('#stmb-sp-import')?.addEventListener('click', () => {
+                dlg.querySelector('#stmb-sp-import-file')?.click();
+            });
+            dlg.querySelector('#stmb-sp-import-file')?.addEventListener('change', async (e) => {
+                await importTemplates(e, popup);
+            });
+
+            // Recreate built-in side prompts (localized to current locale)
+            dlg.querySelector('#stmb-sp-recreate-builtins')?.addEventListener('click', async () => {
+                const warning = `<div class="info_block">${escapeHtml(translate('This will overwrite the built-in Side Prompts (Plotpoints, Status, Cast of Characters, Assess) with the current locale versions. Custom/user-created prompts are not touched. This action cannot be undone.', 'STMemoryBooks_SidePrompts_RecreateWarning'))}</div>`;
+                const confirmPopup = new Popup(
+                    `<h3>${escapeHtml(translate('Recreate Built-in Side Prompts', 'STMemoryBooks_SidePrompts_RecreateTitle'))}</h3>${warning}`,
+                    POPUP_TYPE.CONFIRM,
+                    '',
+                    { okButton: translate('Recreate', 'STMemoryBooks_SidePrompts_RecreateOk'), cancelButton: translate('Cancel', 'STMemoryBooks_Cancel') }
+                );
+                const res = await confirmPopup.show();
+                if (res === POPUP_RESULT.AFFIRMATIVE) {
+                    try {
+                        const r = await recreateBuiltInSidePrompts('overwrite');
+                        const count = Number(r?.replaced || 0);
+                        toastr.success(tr('STMemoryBooks_SidePrompts_RecreateSuccess', 'Recreated {{count}} built-in side prompts from current locale', { count }), translate('STMemoryBooks', 'index.toast.title'));
+                        window.dispatchEvent(new CustomEvent('stmb-sideprompts-updated'));
+                        await refreshList(popup);
+                    } catch (err) {
+                        console.error('STMemoryBooks: Error recreating built-in side prompts:', err);
+                        toastr.error(translate('Failed to recreate built-in side prompts', 'STMemoryBooks_SidePrompts_RecreateFailed'), translate('STMemoryBooks', 'index.toast.title'));
+                    }
+                }
+            });
+
+            // Row selection and inline actions
+            dlg.addEventListener('click', async (e) => {
+                const setActionBtn = e.target.closest('.stmb-sp-set-action');
+                const setRow = e.target.closest('tr[data-set-key]');
+                if (setActionBtn && setRow) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const setKey = setRow.dataset.setKey;
+                    if (setActionBtn.classList.contains('stmb-sp-set-action-edit')) {
+                        await openEditSet(popup, setKey);
+                    } else if (setActionBtn.classList.contains('stmb-sp-set-action-duplicate')) {
+                        try {
+                            await duplicateSet(setKey);
+                            toastr.success(translate('Side prompt set duplicated.', 'STMemoryBooks_SidePromptSetDuplicated'), translate('STMemoryBooks', 'index.toast.title'));
+                            window.dispatchEvent(new CustomEvent('stmb-sideprompts-updated'));
+                            await refreshSetControls(popup);
+                        } catch (err) {
+                            console.error('STMemoryBooks: Error duplicating side prompt set:', err);
+                            toastr.error(translate('Failed to duplicate side prompt set.', 'STMemoryBooks_FailedToDuplicateSidePromptSet'), translate('STMemoryBooks', 'index.toast.title'));
+                        }
+                    } else if (setActionBtn.classList.contains('stmb-sp-set-action-delete')) {
+                        const set = await getSet(setKey);
+                        const confirmPopup = new Popup(
+                            `<h3>${escapeHtml(tr('STMemoryBooks_DeleteSidePromptSetTitle', 'Delete Side Prompt Set', { name: set?.name || setKey }))}</h3><p>${escapeHtml(tr('STMemoryBooks_DeleteSidePromptSetConfirm', 'Delete "{{name}}"? Chats using this set will run no after-memory side prompts until a new mode is selected.', { name: set?.name || setKey }))}</p>`,
+                            POPUP_TYPE.CONFIRM,
+                            '',
+                            { okButton: translate('Delete', 'STMemoryBooks_Delete'), cancelButton: translate('Cancel', 'STMemoryBooks_Cancel') }
+                        );
+                        const res = await confirmPopup.show();
+                        if (res === POPUP_RESULT.AFFIRMATIVE) {
+                            try {
+                                await removeSet(setKey);
+                                toastr.success(translate('Side prompt set deleted.', 'STMemoryBooks_SidePromptSetDeleted'), translate('STMemoryBooks', 'index.toast.title'));
+                                window.dispatchEvent(new CustomEvent('stmb-sideprompts-updated'));
+                                await refreshSetControls(popup);
+                            } catch (err) {
+                                console.error('STMemoryBooks: Error deleting side prompt set:', err);
+                                toastr.error(translate('Failed to delete side prompt set.', 'STMemoryBooks_FailedToDeleteSidePromptSet'), translate('STMemoryBooks', 'index.toast.title'));
+                            }
+                        }
+                    }
+                    return;
+                }
+
+                const actionBtn = e.target.closest('.stmb-sp-action');
+                const row = e.target.closest('tr[data-tpl-key]');
+                if (!row) return;
+                const tplKey = row.dataset.tplKey;
+
+                // Highlight selected row
+                dlg.querySelectorAll('tr[data-tpl-key]').forEach(r => {
+                    r.classList.remove('ui-state-active');
+                    r.style.backgroundColor = '';
+                    r.style.border = '';
+                });
+                row.style.backgroundColor = 'var(--cobalt30a)';
+                row.style.border = '';
+
+                if (actionBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    if (actionBtn.classList.contains('stmb-sp-action-edit')) {
+                        await openEditTemplate(popup, tplKey);
+                    } else if (actionBtn.classList.contains('stmb-sp-action-duplicate')) {
+                        try {
+                            const newKey = await duplicateTemplate(tplKey);
+                            toastr.success(translate('SidePrompt duplicated', 'STMemoryBooks_SidePromptDuplicated'), translate('STMemoryBooks', 'index.toast.title'));
+                            await refreshList(popup, newKey);
+                        } catch (err) {
+                            console.error('STMemoryBooks: Error duplicating side prompt:', err);
+                            toastr.error(translate('Failed to duplicate SidePrompt', 'STMemoryBooks_FailedToDuplicateSidePrompt'), translate('STMemoryBooks', 'index.toast.title'));
+                        }
+                    } else if (actionBtn.classList.contains('stmb-sp-action-delete')) {
+                        const confirmPopup = new Popup(
+                            `<h3>${escapeHtml(tr('STMemoryBooks_DeleteSidePromptTitle', 'Delete Side Prompt', { name: tplKey }))}</h3><p>${escapeHtml(tr('STMemoryBooks_DeleteSidePromptConfirm', 'Are you sure you want to delete this template?', { name: tplKey }))}</p>`,
+                            POPUP_TYPE.CONFIRM,
+                            '',
+                            { okButton: translate('Delete', 'STMemoryBooks_Delete'), cancelButton: translate('Cancel', 'STMemoryBooks_Cancel') }
+                        );
+                        const res = await confirmPopup.show();
+                        if (res === POPUP_RESULT.AFFIRMATIVE) {
+                            try {
+                                await removeTemplate(tplKey);
+                                toastr.success(translate('SidePrompt deleted', 'STMemoryBooks_SidePromptDeleted'), translate('STMemoryBooks', 'index.toast.title'));
+                                await refreshList(popup);
+                            } catch (err) {
+                                console.error('STMemoryBooks: Error deleting side prompt:', err);
+                                toastr.error(translate('Failed to delete SidePrompt', 'STMemoryBooks_FailedToDeleteSidePrompt'), translate('STMemoryBooks', 'index.toast.title'));
+                            }
+                        }
+                    }
+                    return;
+                }
+            });
+        };
+
+        // Prepare and show popup
+        attachHandlers();
+        // Initial render BEFORE show so the table appears immediately
+        await refreshList(popup);
+        await popup.show();
+        try { applyLocale(popup); } catch (e) { /* no-op */ }
+    } catch (error) {
+        console.error('STMemoryBooks: Error showing Side Prompts:', error);
+        toastr.error(translate('Failed to open Side Prompts', 'STMemoryBooks_FailedToOpenSidePrompts'), translate('STMemoryBooks', 'index.toast.title'));
+    }
+}

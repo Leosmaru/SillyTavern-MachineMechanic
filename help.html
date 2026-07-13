@@ -1,0 +1,1125 @@
+<title>Memory Books — документация интерфейса</title>
+<style>
+  :root{
+    /* light — «пергамент и латунь» */
+    --bg:#e7e8e2;
+    --panel:#f6f5f0;
+    --panel-2:#efeee8;
+    --ink:#1c2320;
+    --ink-soft:#33403b;
+    --muted:#5f6b64;
+    --faint:#8a9088;
+    --line:#d2d4cb;
+    --line-soft:#dedfd7;
+    --accent:#a06a26;        /* латунь / позолота корешка */
+    --accent-strong:#835420; /* для ссылок на светлом */
+    --accent-2:#2c6d63;      /* библиотечная бирюза — интерактив/советы */
+    --warn:#a9502a;          /* жжёная охра — предупреждения */
+    --chip-bg:rgba(160,106,38,.11);
+    --chip-line:rgba(160,106,38,.30);
+    --code-bg:#e9e6dc;
+    --row-alt:rgba(28,35,32,.028);
+    --shadow:0 1px 2px rgba(28,35,32,.05),0 8px 24px -18px rgba(28,35,32,.35);
+    --sans:-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,"Times New Roman",serif;
+    --mono:"JetBrains Mono","Cascadia Code",Consolas,"SFMono-Regular",ui-monospace,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#121816;
+      --panel:#1a221f;
+      --panel-2:#161d1b;
+      --ink:#e7e9e1;
+      --ink-soft:#c9cdc3;
+      --muted:#9aa79f;
+      --faint:#71807a;
+      --line:#293430;
+      --line-soft:#212b28;
+      --accent:#d3a35c;
+      --accent-strong:#e0b374;
+      --accent-2:#6ec1b1;
+      --warn:#df9066;
+      --chip-bg:rgba(211,163,92,.13);
+      --chip-line:rgba(211,163,92,.32);
+      --code-bg:#1f2723;
+      --row-alt:rgba(231,233,225,.03);
+      --shadow:0 1px 2px rgba(0,0,0,.3),0 12px 30px -20px rgba(0,0,0,.8);
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#e7e8e2;--panel:#f6f5f0;--panel-2:#efeee8;--ink:#1c2320;--ink-soft:#33403b;
+    --muted:#5f6b64;--faint:#8a9088;--line:#d2d4cb;--line-soft:#dedfd7;
+    --accent:#a06a26;--accent-strong:#835420;--accent-2:#2c6d63;--warn:#a9502a;
+    --chip-bg:rgba(160,106,38,.11);--chip-line:rgba(160,106,38,.30);--code-bg:#e9e6dc;
+    --row-alt:rgba(28,35,32,.028);--shadow:0 1px 2px rgba(28,35,32,.05),0 8px 24px -18px rgba(28,35,32,.35);
+  }
+  :root[data-theme="dark"]{
+    --bg:#121816;--panel:#1a221f;--panel-2:#161d1b;--ink:#e7e9e1;--ink-soft:#c9cdc3;
+    --muted:#9aa79f;--faint:#71807a;--line:#293430;--line-soft:#212b28;
+    --accent:#d3a35c;--accent-strong:#e0b374;--accent-2:#6ec1b1;--warn:#df9066;
+    --chip-bg:rgba(211,163,92,.13);--chip-line:rgba(211,163,92,.32);--code-bg:#1f2723;
+    --row-alt:rgba(231,233,225,.03);--shadow:0 1px 2px rgba(0,0,0,.3),0 12px 30px -20px rgba(0,0,0,.8);
+  }
+
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  @media (prefers-reduced-motion:reduce){ html{scroll-behavior:auto;} *{animation:none!important;transition:none!important;} }
+  body{
+    margin:0;background:var(--bg);color:var(--ink);
+    font-family:var(--sans);font-size:16px;line-height:1.65;
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+  }
+  a{color:var(--accent-strong);text-decoration:none;}
+  a:hover{text-decoration:underline;text-underline-offset:2px;}
+  :focus-visible{outline:2px solid var(--accent-2);outline-offset:2px;border-radius:3px;}
+
+  .shell{max-width:1180px;margin:0 auto;padding:0 clamp(16px,4vw,40px);}
+
+  /* header */
+  header.top{border-top:3px solid var(--accent);}
+  .masthead{padding:clamp(30px,6vw,60px) 0 22px;}
+  .eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;color:var(--accent);margin:0 0 14px;}
+  h1.title{
+    font-family:var(--serif);font-weight:600;line-height:1.05;letter-spacing:-.01em;
+    font-size:clamp(2rem,1.3rem+3.4vw,3.3rem);margin:0;text-wrap:balance;
+  }
+  h1.title .booky{color:var(--accent);}
+  .subtitle{font-family:var(--serif);font-style:italic;color:var(--muted);font-size:clamp(1.05rem,1rem+.5vw,1.3rem);margin:.5rem 0 0;}
+  .meta-row{display:flex;flex-wrap:wrap;gap:8px 10px;margin-top:20px;}
+  .tag{font-family:var(--mono);font-size:.74rem;padding:4px 10px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--muted);}
+  .tag b{color:var(--ink);font-weight:600;}
+  .lede{max-width:66ch;margin:20px 0 0;color:var(--ink-soft);font-size:1.02rem;}
+
+  /* theme toggle */
+  .theme-btn{
+    position:fixed;top:14px;right:14px;z-index:60;
+    font-family:var(--mono);font-size:.72rem;letter-spacing:.05em;
+    background:var(--panel);color:var(--ink);border:1px solid var(--line);
+    border-radius:999px;padding:7px 13px;cursor:pointer;box-shadow:var(--shadow);
+  }
+  .theme-btn:hover{border-color:var(--accent);color:var(--accent);}
+
+  /* layout */
+  .layout{display:grid;grid-template-columns:250px 1fr;gap:clamp(24px,3vw,56px);align-items:start;padding-bottom:80px;}
+  @media (max-width:900px){ .layout{grid-template-columns:1fr;} }
+
+  /* sidebar */
+  aside.toc{position:sticky;top:20px;align-self:start;}
+  @media (max-width:900px){ aside.toc{position:static;} }
+  .toc-inner{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;box-shadow:var(--shadow);}
+  .search{width:100%;font-family:var(--sans);font-size:.92rem;color:var(--ink);
+    background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin-bottom:6px;}
+  .search::placeholder{color:var(--faint);}
+  .search:focus{outline:none;border-color:var(--accent-2);}
+  .search-note{font-size:.72rem;color:var(--faint);margin:0 0 12px;padding-left:2px;min-height:1em;}
+  .toc-title{font-family:var(--mono);font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin:0 0 8px;padding-left:2px;}
+  nav.toc-nav{display:flex;flex-direction:column;gap:1px;}
+  nav.toc-nav a{
+    display:flex;gap:9px;align-items:baseline;padding:6px 8px;border-radius:7px;
+    color:var(--muted);font-size:.9rem;line-height:1.3;border-left:2px solid transparent;
+  }
+  nav.toc-nav a .n{font-family:var(--mono);font-size:.74rem;color:var(--faint);min-width:1.3em;}
+  nav.toc-nav a:hover{background:var(--panel-2);color:var(--ink);text-decoration:none;}
+  nav.toc-nav a.active{background:var(--chip-bg);color:var(--accent);border-left-color:var(--accent);}
+  nav.toc-nav a.active .n{color:var(--accent);}
+
+  /* main */
+  main{min-width:0;}
+  section.chapter{scroll-margin-top:20px;margin-bottom:46px;}
+  .chapter-head{display:flex;gap:14px;align-items:baseline;border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:22px;}
+  .chapter-num{font-family:var(--mono);font-size:.9rem;color:var(--accent);font-weight:600;padding-top:.2em;}
+  h2.chapter-title{font-family:var(--serif);font-weight:600;font-size:clamp(1.4rem,1.2rem+1vw,1.9rem);margin:0;line-height:1.15;text-wrap:balance;}
+  h3.sub{font-family:var(--serif);font-weight:600;font-size:1.15rem;margin:30px 0 6px;color:var(--ink);}
+  h3.sub .code{font-size:.85rem;}
+  .sub-desc{color:var(--muted);margin:.1rem 0 14px;font-size:.96rem;}
+  p{margin:0 0 12px;}
+  .prose{color:var(--ink-soft);}
+
+  /* code / id chips */
+  code,.code{font-family:var(--mono);font-size:.82em;background:var(--code-bg);border:1px solid var(--line-soft);
+    border-radius:5px;padding:1px 6px;color:var(--accent-strong);white-space:nowrap;}
+  pre.pre{font-family:var(--mono);font-size:.8rem;line-height:1.55;background:var(--code-bg);border:1px solid var(--line-soft);
+    border-radius:9px;padding:13px 15px;overflow-x:auto;color:var(--ink-soft);margin:10px 0;white-space:pre;}
+  .prose ul,.prose ol{margin:8px 0 12px;padding-left:20px;color:var(--ink-soft);}
+  .prose li{margin:4px 0;}
+  .callout ul{margin:6px 0 0;padding-left:18px;}
+  .callout li{margin:4px 0;}
+
+  /* tables */
+  .table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel);box-shadow:var(--shadow);}
+  table{border-collapse:collapse;width:100%;font-size:.93rem;min-width:520px;}
+  thead th{
+    text-align:left;font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--faint);font-weight:600;padding:11px 14px;border-bottom:1px solid var(--line);background:var(--panel-2);
+    position:sticky;top:0;
+  }
+  tbody td{padding:11px 14px;border-bottom:1px solid var(--line-soft);vertical-align:top;color:var(--ink-soft);}
+  tbody tr:last-child td{border-bottom:none;}
+  tbody tr:nth-child(even){background:var(--row-alt);}
+  td.ctrl{color:var(--ink);font-weight:500;white-space:normal;}
+  td.ctrl .code{display:inline-block;margin-top:4px;white-space:normal;}
+  td.why{color:var(--muted);}
+  .em{color:var(--accent);font-weight:600;}
+
+  /* callouts */
+  .callout{border:1px solid var(--line);border-left:3px solid var(--accent-2);background:var(--panel);
+    border-radius:8px;padding:12px 16px;margin:16px 0;font-size:.94rem;color:var(--ink-soft);box-shadow:var(--shadow);}
+  .callout.warn{border-left-color:var(--warn);}
+  .callout .lbl{font-family:var(--mono);font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--accent-2);font-weight:600;display:block;margin-bottom:3px;}
+  .callout.warn .lbl{color:var(--warn);}
+
+  /* command block */
+  .cmd-list{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel);box-shadow:var(--shadow);}
+  .cmd-row{display:grid;grid-template-columns:minmax(200px,.9fr) 1.4fr;gap:0;border-bottom:1px solid var(--line-soft);}
+  .cmd-row:last-child{border-bottom:none;}
+  .cmd-row:nth-child(even){background:var(--row-alt);}
+  .cmd-key{font-family:var(--mono);font-size:.83rem;color:var(--accent-strong);padding:11px 14px;border-right:1px solid var(--line-soft);word-break:break-word;}
+  .cmd-desc{padding:11px 14px;color:var(--ink-soft);font-size:.93rem;}
+  @media (max-width:560px){ .cmd-row{grid-template-columns:1fr;} .cmd-key{border-right:none;border-bottom:1px solid var(--line-soft);} }
+
+  /* pill for section 2 buttons */
+  .btn-pill{font-family:var(--mono);font-size:.8rem;background:var(--chip-bg);border:1px solid var(--chip-line);
+    color:var(--accent);border-radius:6px;padding:1px 7px;white-space:nowrap;}
+
+  /* ── worked examples ── */
+  .example{border:1px solid var(--line);border-radius:12px;background:var(--panel);box-shadow:var(--shadow);overflow:hidden;margin:18px 0;}
+  .example-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 10px;padding:11px 16px;background:var(--panel-2);border-bottom:1px solid var(--line);}
+  .example-head .lbl{font-family:var(--mono);font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:600;}
+  .example-head .ttl{font-family:var(--serif);font-weight:600;color:var(--ink);font-size:1.02rem;}
+  .example-body{padding:6px 16px 14px;}
+  .example.mini .example-body{padding:14px 16px;}
+
+  .step{display:flex;gap:14px;padding:15px 0;border-bottom:1px dashed var(--line-soft);}
+  .step:last-child{border-bottom:none;}
+  .step-n{flex:0 0 auto;width:27px;height:27px;border-radius:50%;background:var(--chip-bg);border:1px solid var(--chip-line);
+    color:var(--accent);font-family:var(--mono);font-size:.82rem;font-weight:600;display:flex;align-items:center;justify-content:center;}
+  .step-main{min-width:0;flex:1;}
+  .step-main h4{margin:.15em 0 .35em;font-family:var(--serif);font-size:1.05rem;color:var(--ink);font-weight:600;}
+  .step-main p{color:var(--ink-soft);margin:0 0 9px;font-size:.95rem;}
+  .step-main p:last-child{margin-bottom:0;}
+
+  /* mini chat */
+  .chat{display:flex;flex-direction:column;gap:7px;background:var(--panel-2);border:1px solid var(--line-soft);border-radius:9px;padding:11px 13px;margin:9px 0;}
+  .msg{font-size:.9rem;line-height:1.5;color:var(--ink-soft);}
+  .msg .who{font-family:var(--mono);font-size:.68rem;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);margin-right:7px;}
+  .msg .num{font-family:var(--mono);font-size:.68rem;color:var(--faint);margin-right:5px;}
+  .msg.char .who{color:var(--accent);}
+  .msg.user .who{color:var(--accent-2);}
+  .msg.sys{font-style:italic;font-size:.83rem;color:var(--muted);}
+  .msg.sys .who{color:var(--faint);}
+  .msg .mark{color:var(--accent-2);font-weight:600;}
+  .msg .bad{color:var(--warn);font-weight:600;}
+
+  /* lorebook entry card */
+  .lore{border:1px solid var(--chip-line);border-radius:10px;background:linear-gradient(180deg,var(--chip-bg),transparent);padding:13px 15px;margin:9px 0;}
+  .lore-t{font-family:var(--mono);font-weight:600;color:var(--accent-strong);font-size:.9rem;margin-bottom:9px;}
+  .keys{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;}
+  .key{font-family:var(--mono);font-size:.72rem;background:var(--chip-bg);border:1px solid var(--chip-line);color:var(--accent);border-radius:5px;padding:2px 7px;white-space:nowrap;}
+  .lore-c{color:var(--ink-soft);font-size:.92rem;line-height:1.55;}
+  .lore-meta{margin-top:10px;font-family:var(--mono);font-size:.69rem;color:var(--faint);}
+
+  /* flow arrow */
+  .flow{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:9px;color:var(--muted);font-size:.85rem;margin:6px 0;font-family:var(--mono);text-align:center;}
+  .flow .arr{color:var(--accent);font-size:1.1rem;}
+
+  /* token comparison bars */
+  .tokens{display:flex;flex-direction:column;gap:11px;margin:11px 0 2px;}
+  .tk{display:grid;grid-template-columns:150px 1fr auto;gap:12px;align-items:center;font-size:.85rem;}
+  .tk .tk-lbl{color:var(--muted);}
+  .tk .track{background:var(--panel-2);border-radius:6px;overflow:hidden;}
+  .tk .bar{height:17px;border-radius:6px;}
+  .tk.before .bar{background:linear-gradient(90deg,var(--warn),color-mix(in srgb,var(--warn) 35%,transparent));}
+  .tk.after .bar{background:linear-gradient(90deg,var(--accent-2),color-mix(in srgb,var(--accent-2) 35%,transparent));}
+  .tk .tk-val{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--ink);white-space:nowrap;}
+  @media (max-width:560px){ .tk{grid-template-columns:1fr auto;} .tk .track{grid-column:1/-1;order:3;} }
+
+  /* prompt-stack diagram */
+  .stack-cap{font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);text-align:center;margin:6px 0;}
+  .stack{display:flex;flex-direction:column;gap:4px;margin:8px 0;}
+  .layer{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 13px;border-radius:8px;font-size:.88rem;
+    border:1px solid var(--line-soft);background:var(--panel);color:var(--ink-soft);}
+  .layer .pos{font-family:var(--mono);font-size:.72rem;color:var(--faint);white-space:nowrap;flex:0 0 auto;}
+  .layer.mem{background:var(--chip-bg);border-color:var(--chip-line);color:var(--accent-strong);font-weight:600;}
+  .layer.mem .pos{color:var(--accent);}
+  .layer.core{color:var(--muted);}
+  .layer.chat{background:color-mix(in srgb,var(--accent-2) 13%,transparent);border-color:color-mix(in srgb,var(--accent-2) 32%,transparent);}
+
+  /* use-case + settings badges */
+  .badges{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px;}
+  .badge{font-family:var(--mono);font-size:.72rem;background:var(--panel-2);border:1px solid var(--line-soft);color:var(--muted);border-radius:6px;padding:2px 8px;white-space:nowrap;}
+
+  /* consolidation merge diagram */
+  .merge{display:grid;grid-template-columns:1fr auto 1fr;gap:14px;align-items:center;margin:10px 0 2px;}
+  .merge .arr{color:var(--accent);font-size:1.5rem;text-align:center;}
+  .merge-list{display:flex;flex-direction:column;gap:5px;}
+  .merge-list .li{font-family:var(--mono);font-size:.74rem;color:var(--muted);background:var(--panel-2);border:1px solid var(--line-soft);border-radius:6px;padding:4px 9px;}
+  @media (max-width:560px){ .merge{grid-template-columns:1fr;} .merge .arr{transform:rotate(90deg);} }
+
+  .empty-state{display:none;text-align:center;color:var(--muted);padding:40px 0;font-style:italic;}
+  .hidden{display:none!important;}
+
+  footer.foot{border-top:1px solid var(--line);padding:26px 0 60px;color:var(--faint);font-size:.85rem;}
+  footer.foot code{font-size:.8em;}
+</style>
+
+<button class="theme-btn" id="themeBtn" type="button" aria-label="Переключить тему">◐ Тема</button>
+
+<header class="top">
+  <div class="shell masthead">
+    <p class="eyebrow">Справочник интерфейса · SillyTavern</p>
+    <h1 class="title">📕 <span class="booky">Memory&nbsp;Books</span></h1>
+    <p class="subtitle">Что делает каждая кнопка, настройка и меню — и зачем</p>
+    <div class="meta-row">
+      <span class="tag">версия <b>6.12.0</b></span>
+      <span class="tag">расширение <b>SillyTavern</b></span>
+      <span class="tag">лорбук · память · сцены</span>
+    </div>
+    <p class="lede">Плагин превращает переписку в «воспоминания» и записывает их в лорбук (World Info) с ключевыми словами и нумерованными заголовками. Ниже разобран весь интерфейс — от разметки сцены в чате до попапов и слэш-команд.</p>
+  </div>
+</header>
+
+<div class="shell layout">
+  <aside class="toc">
+    <div class="toc-inner">
+      <input class="search" id="search" type="search" placeholder="Поиск: настройка, кнопка, id…" aria-label="Поиск по документации" autocomplete="off">
+      <p class="search-note" id="searchNote"></p>
+      <p class="toc-title">Оглавление</p>
+      <nav class="toc-nav" id="tocNav">
+        <a href="#c1"><span class="n">1</span><span>Как открыть плагин</span></a>
+        <a href="#c2"><span class="n">2</span><span>Разметка сцены в чате</span></a>
+        <a href="#cx"><span class="n">▶</span><span>Ролеплей-пример</span></a>
+        <a href="#cu"><span class="n">◆</span><span>Для каких целей</span></a>
+        <a href="#cp"><span class="n">⚖</span><span>Порядок и приоритет</span></a>
+        <a href="#cc"><span class="n">∑</span><span>Консолидация и уровни</span></a>
+        <a href="#c3"><span class="n">3</span><span>Главное окно настроек</span></a>
+        <a href="#c4"><span class="n">4</span><span>Всплывающие окна</span></a>
+        <a href="#c5"><span class="n">5</span><span>Слэш-команды</span></a>
+        <a href="#c6"><span class="n">6</span><span>HTML-утилиты</span></a>
+        <a href="#c7"><span class="n">§</span><span>Где что в коде</span></a>
+      </nav>
+    </div>
+  </aside>
+
+  <main id="main">
+    <p class="empty-state" id="emptyState">Ничего не найдено. Попробуйте другой запрос.</p>
+
+    <!-- 1 -->
+    <section class="chapter" id="c1" data-search="открыть плагин меню расширений memory books иконка книги палочка">
+      <div class="chapter-head"><span class="chapter-num">01</span><h2 class="chapter-title">Как открыть плагин</h2></div>
+      <p class="prose"><b>Меню расширений → «Memory Books»</b> (иконка книги 📖). Пункт добавляется в выпадающее меню расширений («волшебная палочка») внизу чата. Клик по нему открывает <span class="em">главное окно настроек</span> — центральный экран плагина, описанный в разделе&nbsp;3.</p>
+    </section>
+
+    <!-- 2 -->
+    <section class="chapter" id="c2" data-search="разметка сцены шеврон маркер start end clip выделение текста">
+      <div class="chapter-head"><span class="chapter-num">02</span><h2 class="chapter-title">Разметка сцены в чате</h2></div>
+      <p class="prose">Прежде чем создать воспоминание, в чате отмечают <b>начало и конец сцены</b> — диапазон сообщений, из которого будет собрана память.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Элемент</th><th>Что делает</th><th>Зачем</th></tr></thead>
+          <tbody>
+            <tr data-search="шеврон начало start mes_stmb_start"><td class="ctrl">Шеврон <span class="btn-pill">►</span> на сообщении</td><td>Отмечает <span class="em">начало</span> сцены (start)</td><td class="why">Задаёт нижнюю границу диапазона сообщений</td></tr>
+            <tr data-search="шеврон конец end mes_stmb_end"><td class="ctrl">Шеврон <span class="btn-pill">◄</span> на сообщении</td><td>Отмечает <span class="em">конец</span> сцены (end)</td><td class="why">Задаёт верхнюю границу диапазона</td></tr>
+            <tr data-search="плавающая кнопка clip выделение текст"><td class="ctrl">Плавающая кнопка <span class="btn-pill">Clip</span></td><td>Появляется при выделении текста в чате (если включена в настройках)</td><td class="why">Быстро «вырезать» фрагмент для тематической памяти</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout"><span class="lbl">Совет</span>Если маркеры не выставлены, в окне настроек показывается предупреждение «No scene markers set…». Активная сцена подсвечивает диапазон сообщений прямо в чате.</div>
+    </section>
+
+    <!-- сценарий -->
+    <section class="chapter" id="cx" data-search="пример использования ролеплей сценарий как работает влияет наглядно лира торговец кинжал память лорбук ключи токены">
+      <div class="chapter-head"><span class="chapter-num">▶</span><h2 class="chapter-title">Ролеплей-пример: от сцены до памяти</h2></div>
+      <p class="prose">Разберём на живом примере, <b>что вы делаете, что получается и как это влияет на модель</b>. Фэнтези-ролеплей: спутница <span class="code">{{user}}</span> — эльфийка-следопыт <span class="em">Лира</span>. В чате уже около 160 сообщений, и модель начинает путать детали ранних сцен.</p>
+
+      <div class="example">
+        <div class="example-head"><span class="lbl">Сценарий</span><span class="ttl">Долг торговцу Молчуну</span></div>
+        <div class="example-body">
+
+          <div class="step">
+            <div class="step-n">1</div>
+            <div class="step-main">
+              <h4>Проблема: модель забывает</h4>
+              <p>К 160-му сообщению ранняя сцена у Серого моста ушла из контекста. На прямой вопрос ИИ отвечает невпопад.</p>
+              <div class="chat">
+                <div class="msg user"><span class="num">#158</span><span class="who">{{user}}</span>Лира, напомни — сколько я должен Молчуну?</div>
+                <div class="msg char"><span class="num">#159</span><span class="who">Лира</span>Прости… я не припомню такого имени. <span class="bad">← деталь потеряна</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="step">
+            <div class="step-n">2</div>
+            <div class="step-main">
+              <h4>Действие: размечаем сцену и создаём память</h4>
+              <p>Ставим шеврон <span class="btn-pill">►</span> на сообщение&nbsp;#71 и <span class="btn-pill">◄</span> на&nbsp;#96 — это вся сцена у моста (26 сообщений). Жмём <span class="btn-pill">🧠 Create Memory</span>. Плагин отправляет эти сообщения профилю и получает компактную сводку в лорбук:</p>
+              <div class="flow"><span class="arr">▼</span> 26 сообщений &nbsp;→&nbsp; 🧠 &nbsp;→&nbsp; 1 запись памяти</div>
+              <div class="lore">
+                <div class="lore-t">007 — Сделка у Серого моста</div>
+                <div class="keys"><span class="key">Серый мост</span><span class="key">Молчун</span><span class="key">кинжал «Ветерок»</span><span class="key">долг</span><span class="key">200 монет</span></div>
+                <div class="lore-c">{{user}} и Лира встретили у Серого моста торговца по прозвищу Молчун. {{user}} купил эльфийский кинжал «Ветерок», но денег хватило лишь на половину — Молчун согласился на долг под обещание вернуть остаток (100 монет) к следующему полнолунию. Лира не доверяет торговцу и советует держаться настороже.</div>
+                <div class="lore-meta">Сообщения 71–96 · профиль «Сжатая проза» · ключи срабатывают в чате</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="step">
+            <div class="step-n">3</div>
+            <div class="step-main">
+              <h4>Эффект: экономия токенов</h4>
+              <p>Сразу после этого включённый <span class="em">Auto-hide</span> прячет сообщения 71–96 из активного контекста — их смысл теперь несёт лёгкая запись.</p>
+              <div class="tokens">
+                <div class="tk before"><span class="tk-lbl">Сырые 26 сообщений</span><div class="track"><div class="bar" style="width:100%"></div></div><span class="tk-val">≈ 8 200 ток.</span></div>
+                <div class="tk after"><span class="tk-lbl">Запись памяти</span><div class="track"><div class="bar" style="width:8%"></div></div><span class="tk-val">≈ 620 ток.</span></div>
+              </div>
+              <div class="callout"><span class="lbl">Как это влияет</span>Вместо ~8 200 токенов сырого текста в контексте остаётся запись на ~620 токенов, которая ещё и подгружается только при упоминании ключей. Экономия ≈ 93% — освобождается место под новые сцены, а разговор не «глупеет» от переполненного контекста.</div>
+            </div>
+          </div>
+
+          <div class="step">
+            <div class="step-n">4</div>
+            <div class="step-main">
+              <h4>Отдача: модель снова «помнит»</h4>
+              <p>Спустя ~90 сообщений {{user}} снова берётся за кинжал. В тексте появляется слово «Ветерок» — срабатывает ключ записи, и её содержимое подставляется в контекст перед ответом.</p>
+              <div class="chat">
+                <div class="msg user"><span class="num">#251</span><span class="who">{{user}}</span>Достаю кинжал «Ветерок» и осматриваю лезвие.</div>
+                <div class="msg sys"><span class="who">лорбук</span>🔑 сработал ключ «Ветерок» → в контекст добавлена запись «007 — Сделка у Серого моста»</div>
+                <div class="msg char"><span class="num">#252</span><span class="who">Лира</span>Тот самый клинок от Молчуна. Не забывай — ты всё ещё должен ему сотню монет к полнолунию. <span class="mark">✓ деталь восстановлена</span></div>
+              </div>
+              <div class="callout"><span class="lbl">Как это влияет</span>Модель «вспомнила» и долг, и недоверие Лиры — хотя исходные 26 сообщений давно скрыты и далеко в истории. Это и есть суть плагина: память живёт в лорбуке и срабатывает по ключам ровно тогда, когда она нужна.</div>
+            </div>
+          </div>
+
+          <div class="step">
+            <div class="step-n">5</div>
+            <div class="step-main">
+              <h4>Масштаб: авто-память и консолидация</h4>
+              <p>Чтобы не размечать каждую сцену вручную, включают <span class="em">Auto-Summary</span> (интервал 50) — плагин сам делает запись каждые 50 сообщений. Когда записей накапливается много, <span class="btn-pill">🌈 Consolidate Memories</span> сшивает связанные в одну «арку»:</p>
+              <div class="merge">
+                <div class="merge-list">
+                  <div class="li">007 — Серый мост</div>
+                  <div class="li">008 — Тропа теней</div>
+                  <div class="li">009 — Ночь у костра</div>
+                  <div class="li">010 — Волчья засада</div>
+                  <div class="li">011 — Старый друид</div>
+                  <div class="li">012 — Выход из леса</div>
+                </div>
+                <div class="arr">→</div>
+                <div class="lore" style="margin:0">
+                  <div class="lore-t">Арка I — Путь через Северный лес</div>
+                  <div class="keys"><span class="key">Северный лес</span><span class="key">путешествие</span><span class="key">Молчун</span></div>
+                  <div class="lore-c">Сводка шести сцен: от сделки у моста до выхода из леса — с долгом Молчуну, стычкой с волками и советом друида.</div>
+                </div>
+              </div>
+              <div class="callout"><span class="lbl">Как это влияет</span>Шесть отдельных записей превращаются в одну сводную арку с общим ключом. Контекст остаётся лёгким даже на дистанции в сотни сообщений, а ранние сюжетные нити не теряются.</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- для каких целей -->
+    <section class="chapter" id="cu" data-search="для каких целей использовать применение сценарии кампания сессии экономия токенов состояние мира">
+      <div class="chapter-head"><span class="chapter-num">◆</span><h2 class="chapter-title">Для каких целей это использовать</h2></div>
+      <p class="prose">Коротко: плагин нужен там, где <b>переписка длиннее, чем помещается в контекст модели</b>. Он переносит суть старых сцен в лорбук, а модель подтягивает её по мере надобности.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Задача</th><th>Как помогает</th><th>Что включить</th></tr></thead>
+        <tbody>
+          <tr data-search="длинный ролеплей кампания сотни тысячи сообщений забывает"><td class="ctrl">Длинный ролеплей / кампания<br>(сотни–тысячи сообщений)</td><td>Модель перестаёт забывать ранние события — они живут в записях памяти</td><td class="why">Auto-Summary + Create Memory</td></tr>
+          <tr data-search="многосессионная история продолжить через недели"><td class="ctrl">Многосессионная история</td><td>Вернуться к сюжету через недели — ничего не потеряно</td><td class="why">Лорбук, привязанный к чату</td></tr>
+          <tr data-search="состояние мира инвентарь отношения квесты трекеры"><td class="ctrl">Держать «состояние мира»<br>(инвентарь, отношения, квесты)</td><td>Актуальные факты всегда перед глазами модели</td><td class="why">Трекеры / сайд-промпты (🔵 Constant)</td></tr>
+          <tr data-search="экономия токенов деньги короткие записи сырой лог"><td class="ctrl">Экономия токенов и денег</td><td>В контексте короткие сводки вместо сырого лога на тысячи токенов</td><td class="why">Auto-hide + память</td></tr>
+          <tr data-search="оживить старую нить сюжета всплыл ключ вернулась деталь"><td class="ctrl">Оживить старую сюжетную нить</td><td>Всплыло ключевое слово → нужная деталь вернулась в ответ</td><td class="why">Ключевые слова записи</td></tr>
+          <tr data-search="обзор истории дневник кампании просмотр записей"><td class="ctrl">Обзор истории кампании</td><td>Лорбук работает как «дневник» — компактная летопись событий</td><td class="why">Просмотр записей / Compaction</td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout warn"><span class="lbl">Когда не нужно</span>Для коротких чатов (десятки сообщений), которые целиком помещаются в контекст, память избыточна — она полезна именно на длинной дистанции.</div>
+    </section>
+
+    <!-- порядок и приоритет -->
+    <section class="chapter" id="cp" data-search="порядок приоритет позиция встраивание активация режим вставка промпт constant vectorized normal order depth рекурсия инвентарь">
+      <div class="chapter-head"><span class="chapter-num">⚖</span><h2 class="chapter-title">Порядок, позиция и приоритет</h2></div>
+      <p class="prose">Куда запись попадёт в промпте и насколько она «весома» для модели, решают три параметра. Их задают в редакторе профиля: <span class="btn-pill">✏️ Edit Profile</span> → блок <b>Lorebook Entry Settings</b>. Это и есть «порядок встраивания».</p>
+
+      <h3 class="sub">Как это ложится в общий поток промпта</h3>
+      <p class="sub-desc">Промпт для модели собирается сверху вниз. Записи памяти вставляются в выбранную позицию — по умолчанию <span class="code">↑Char</span>, то есть высоко, как устойчивый фон.</p>
+      <p class="stack-cap">↑ верх промпта · весомее для модели</p>
+      <div class="stack">
+        <div class="layer core"><span>Системный промпт / инструкции</span><span class="pos">system</span></div>
+        <div class="layer mem"><span>🧠 Записи памяти (и трекеры)</span><span class="pos">↑Char — по умолчанию</span></div>
+        <div class="layer core"><span>Карточка персонажа</span><span class="pos">character</span></div>
+        <div class="layer core"><span>Примеры сообщений</span><span class="pos">↑EM / ↓EM</span></div>
+        <div class="layer core"><span>Авторская заметка</span><span class="pos">↑AN / ↓AN</span></div>
+        <div class="layer chat"><span>История чата (свежие сообщения)</span><span class="pos">«сейчас»</span></div>
+      </div>
+      <p class="stack-cap">↓ низ промпта · ближе к текущему моменту</p>
+
+      <h3 class="sub">1 · Activation Mode — когда запись попадает в промпт</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Режим</th><th>Когда активируется</th><th>Для чего</th></tr></thead>
+        <tbody>
+          <tr data-search="vectorized link векторный смысловой поиск по умолчанию"><td class="ctrl">🔗 Vectorized<br><span class="code">по умолчанию</span></td><td>По смысловому (векторному) поиску — подтягивается, когда тема совпадает, даже без точного ключа</td><td class="why">Рекомендуется для воспоминаний. Требует включённой векторизации в ST</td></tr>
+          <tr data-search="constant blue всегда в промпте независимо от ключей"><td class="ctrl">🔵 Constant</td><td>Всегда в промпте, независимо от ключей</td><td class="why">Для того, что должно быть перед глазами постоянно (инвентарь, ключевые факты). Ест токены всегда</td></tr>
+          <tr data-search="normal green по ключевым словам scan depth"><td class="ctrl">🟢 Normal</td><td>По совпадению ключевых слов в пределах scan depth</td><td class="why">Классический режим лорбука</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 class="sub">2 · Insertion Position — куда вставляется</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Позиция</th><th>Место в промпте</th></tr></thead>
+        <tbody>
+          <tr data-search="↑char перед описанием персонажа рекомендуется"><td class="ctrl">↑Char <span class="code">реком.</span></td><td>Перед описанием персонажа — весомый постоянный фон</td></tr>
+          <tr data-search="↓char после описания персонажа"><td class="ctrl">↓Char</td><td>После описания персонажа</td></tr>
+          <tr data-search="↑em ↓em примеры сообщений"><td class="ctrl">↑EM / ↓EM</td><td>До / после примеров сообщений</td></tr>
+          <tr data-search="↑an ↓an авторская заметка ниже не опускать"><td class="ctrl">↑AN / ↓AN</td><td>До / после авторской заметки. Ниже память опускать не рекомендуется — потеряется среди свежих сообщений</td></tr>
+          <tr data-search="outlet именованная точка вставки outlet name"><td class="ctrl">Outlet</td><td>В вашу именованную точку вставки (+ поле «Outlet Name»)</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 class="sub">3 · Insertion Order — приоритет при равной позиции</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Режим</th><th>Как считается order</th></tr></thead>
+        <tbody>
+          <tr data-search="auto по номеру памяти свежие больший order"><td class="ctrl">Auto (по №)</td><td>order = номер воспоминания; свежие записи получают больший order</td></tr>
+          <tr data-search="reverse обратный только outlet reversestart"><td class="ctrl">Reverse</td><td>order = reverseStart − (№−1); только вместе с Outlet</td></tr>
+          <tr data-search="manual ручной фиксированный order 9999"><td class="ctrl">Manual</td><td>Фиксированный order (1–9999) для всех записей</td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout"><span class="lbl">Что такое приоритет</span>В SillyTavern записи с <b>бóльшим order</b> имеют приоритет: они вставляются раньше и первыми проходят в лимит токенов (budget). При переполнении контекста записи с меньшим order отбрасываются раньше. Позиция важнее order: сначала группировка по позиции, затем сортировка по order внутри неё.</div>
+
+      <h3 class="sub">4 · Recursion Settings — рекурсия</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Флаг</th><th>Что делает</th></tr></thead>
+        <tbody>
+          <tr data-search="prevent recursion запись не активирует другие preventrecursion"><td class="ctrl">Prevent Recursion</td><td>Запись не может активировать другие записи (не запускает рекурсивное сканирование)</td></tr>
+          <tr data-search="delay until recursion только на этапе рекурсии delayuntilrecursion"><td class="ctrl">Delay Until Recursion</td><td>Запись включается только на этапе рекурсии — её могут «подтянуть» другие записи, но не прямое сканирование чата</td></tr>
+        </tbody>
+      </table></div>
+
+      <div class="example" data-search="пример почему инвентарь важнее приоритет constant order бюджет">
+        <div class="example-head"><span class="lbl">Пример</span><span class="ttl">Почему «Инвентарь» имеет приоритет над эпизодом</span></div>
+        <div class="example-body">
+          <div class="lore">
+            <div class="lore-t">🎒 Инвентарь (трекер)</div>
+            <div class="badges"><span class="badge">🔵 Constant</span><span class="badge">↑Char</span><span class="badge">order 9999</span></div>
+            <div class="lore-c">кинжал «Ветерок», 3 зелья, 87 монет — <span class="em">всегда</span> вверху промпта, не отбрасывается при нехватке бюджета.</div>
+          </div>
+          <div class="lore">
+            <div class="lore-t">007 — Сделка у Серого моста (эпизод)</div>
+            <div class="badges"><span class="badge">🔗 Vectorized</span><span class="badge">↑Char</span><span class="badge">order 7</span></div>
+            <div class="lore-c">появляется <span class="em">по смыслу</span> (когда всплывает тема) и при переполнении контекста уступает записям с бóльшим order.</div>
+          </div>
+          <div class="callout"><span class="lbl">Как это влияет</span>Инвентарь модель «держит в голове» постоянно и с наивысшим приоритетом, а эпизодические воспоминания включаются ситуативно и уступают место. Управляя режимом, позицией и order, вы решаете, <b>что фон всегда, а что — по запросу</b>.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- консолидация -->
+    <section class="chapter" id="cc" data-search="консолидация уровни tiers арки объединение фрагментация сжатие опции промпты memory arc chapter book legend series epic member_ids json preset макросы">
+      <div class="chapter-head"><span class="chapter-num">∑</span><h2 class="chapter-title">Консолидация: уровни, опции и промпты</h2></div>
+
+      <h3 class="sub">Зачем это нужно</h3>
+      <p class="prose">Со временем воспоминаний становятся <b>десятки и сотни</b>. Даже по 600 токенов каждая — если в одной сцене сработает 15 ключей, это снова ~9 000 токенов и переполнение. Плюс сюжет дробится на обрывки. Консолидация решает обе проблемы.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Проблема без консолидации</th><th>Что даёт консолидация</th></tr></thead>
+        <tbody>
+          <tr data-search="много активаций токены переполнение"><td class="ctrl">Много мелких записей → много активаций → снова переполнение контекста</td><td>Одна сводка вместо группы записей — меньше активаций и токенов</td></tr>
+          <tr data-search="фрагментация обрывки сюжет целостность"><td class="ctrl">Модель видит обрывки сцен, теряет общую линию</td><td>Целостная сводка сюжетной дуги вместо разрозненных кусков</td></tr>
+          <tr data-search="дубли повторы старые детали"><td class="ctrl">Повторы и дубли одних и тех же деталей</td><td>Сшивает и убирает избыточность</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 class="sub">Лестница уровней (tiers)</h3>
+      <p class="sub-desc">Консолидация многоуровневая: каждый уровень собирается <b>из уровня на ступень ниже</b> (по умолчанию нужно минимум 5 записей). Так одни и те же сцены постепенно сжимаются во всё более крупные сводки.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Уровень</th><th>Собирается из</th><th>Что это по смыслу</th><th>Заголовок по умолч.</th></tr></thead>
+        <tbody>
+          <tr data-search="memory воспоминание сцена базовый tier 0"><td class="ctrl">Memory <span class="code">tier 0</span></td><td>— (базовый, из сцены чата)</td><td>Одна сцена / эпизод</td><td><span class="code">[000] - {{title}}</span></td></tr>
+          <tr data-search="arc арка дуга tier 1"><td class="ctrl">Arc <span class="code">tier 1</span></td><td>Memory</td><td>Сюжетная дуга (несколько сцен)</td><td><span class="code">[ARC 000] - …</span></td></tr>
+          <tr data-search="chapter глава tier 2"><td class="ctrl">Chapter <span class="code">tier 2</span></td><td>Arc</td><td>Глава (несколько дуг)</td><td><span class="code">[CHAPTER 000] - …</span></td></tr>
+          <tr data-search="book том книга tier 3"><td class="ctrl">Book <span class="code">tier 3</span></td><td>Chapter</td><td>Том / книга</td><td><span class="code">[BOOK 000] - …</span></td></tr>
+          <tr data-search="legend легенда tier 4"><td class="ctrl">Legend <span class="code">tier 4</span></td><td>Book</td><td>Крупный свод (очень длинные кампании)</td><td><span class="code">[LEGEND 000] - …</span></td></tr>
+          <tr data-search="series серия tier 5"><td class="ctrl">Series <span class="code">tier 5</span></td><td>Legend</td><td>Цикл историй</td><td><span class="code">[SERIES 000] - …</span></td></tr>
+          <tr data-search="epic эпос tier 6"><td class="ctrl">Epic <span class="code">tier 6</span></td><td>Series</td><td>Максимальный уровень свёртки</td><td><span class="code">[EPIC 000] - …</span></td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout"><span class="lbl">Проще говоря</span>Большинству хватает <b>Memory → Arc → Chapter</b>. Book / Legend / Series / Epic нужны только для гигантских многолетних кампаний — это просто более крупные «полки» той же лестницы. В окне вы выбираете <b>целевой</b> уровень, а источник всегда берётся на ступень ниже.</div>
+
+      <h3 class="sub">Окно «🌈 Consolidate Memories» — все опции</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Опция</th><th>Что делает</th><th>По умолч.</th></tr></thead>
+        <tbody>
+          <tr data-search="summary tier целевой уровень stmb-summary-tier"><td class="ctrl">Summary Tier</td><td>Какой уровень строим (Arc…Epic). Источник — уровень на ступень ниже</td><td class="why">Arc</td></tr>
+          <tr data-search="preset пресет промпт консолидации rebuild built-ins stmb-arc-preset"><td class="ctrl">Preset</td><td>Пресет промпта консолидации. «Rebuild from built-ins» — восстановить встроенные пресеты</td><td class="why">по умолч.</td></tr>
+          <tr data-search="maximum entries per pass за проход stmb-arc-maxpass"><td class="ctrl">Max entries per pass</td><td>Сколько исходных записей обрабатывать за один проход</td><td class="why">15</td></tr>
+          <tr data-search="token budget лимит токенов stmb-arc-token"><td class="ctrl">Token Budget</td><td>Лимит токенов на один проход</td><td class="why">30 000</td></tr>
+          <tr data-search="number of automatic summary attempts проходы stmb-arc-maxpasses"><td class="ctrl">Automatic summary attempts</td><td>Сколько проходов запускать автоматически подряд</td><td class="why">10</td></tr>
+          <tr data-search="minimum eligible needed ready минимум созрел stmb-arc-minassigned"><td class="ctrl">Minimum eligible … before tier is ready</td><td>Минимум исходных записей, чтобы уровень «созрел» (и для авто-запроса консолидации)</td><td class="why">5</td></tr>
+          <tr data-search="lorebook entry settings активация позиция порядок сводки"><td class="ctrl">Lorebook Entry Settings</td><td>Как сохранить сводку: режим активации, позиция, порядок, рекурсия (см. <a href="#cp">⚖</a>)</td><td class="why">🔗·↑Char·Auto</td></tr>
+          <tr data-search="disable originals отключить исходники после stmb-arc-disable-originals"><td class="ctrl">Disable source entries after creating summaries</td><td>Отключить исходные записи после сборки, чтобы они не срабатывали вместе со сводкой (иначе дубли и лишние токены)</td><td class="why">вкл</td></tr>
+          <tr data-search="select all deselect all чеклист записи включить"><td class="ctrl">Select All / Deselect All + чеклист</td><td>Отметить, какие именно записи войдут в сводку</td><td class="why">все</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 class="sub">Промпты консолидации — что и как писать</h3>
+      <p class="sub-desc">Правятся в <span class="btn-pill">🧱 Consolidation Prompt Manager</span>. Один промпт работает на любом уровне благодаря макросам:</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Макрос</th><th>Значение</th></tr></thead>
+        <tbody>
+          <tr data-search="stmbtier целевой уровень макрос"><td class="ctrl"><span class="code">{{stmbtier}}</span></td><td>Целевой уровень (например «arc»)</td></tr>
+          <tr data-search="stmbchildtier исходный уровень макрос"><td class="ctrl"><span class="code">{{stmbchildtier}}</span></td><td>Исходный уровень (например «memory»)</td></tr>
+        </tbody>
+      </table></div>
+      <p class="prose">Ответ модели <b>обязан быть строго JSON</b> такого вида — по нему плагин раскладывает сводки:</p>
+      <pre class="pre">{
+  "summaries": [
+    {
+      "title": "Короткий заголовок (3–6 слов)",
+      "summary": "Структурированная сводка одной строкой",
+      "keywords": ["ключ1", "ключ2"],
+      "member_ids": ["&lt;ID&gt;", "…"]
+    }
+  ],
+  "unassigned_items": [
+    { "id": "item-id", "reason": "Почему не вошло в сводку" }
+  ]
+}</pre>
+      <ul class="prose">
+        <li><b>member_ids</b> — какие исходные записи вошли в сводку. Обязательно, если сводок несколько: иначе плагин не поймёт, что куда, и не даст править их по отдельности.</li>
+        <li><b>unassigned_items</b> — что не подошло и почему.</li>
+      </ul>
+
+      <p class="sub-desc" style="margin-top:16px">Три встроенных пресета — выбирайте по объёму:</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Пресет</th><th>Что делает</th><th>Когда применять</th></tr></thead>
+        <tbody>
+          <tr data-search="default подробный структура major beats character dynamics key exchanges outcome"><td class="ctrl">Default</td><td>Подробная структура: Premise · Major Beats · Character Dynamics · Key Exchanges · Outcome &amp; Continuity</td><td class="why">Важные сюжетные дуги, где нужна точность</td></tr>
+          <tr data-search="alternate компактный одна сводка"><td class="ctrl">Alternate</td><td>Одна компактная сводка без жёсткой рубрикации</td><td class="why">Баланс размера и детальности</td></tr>
+          <tr data-search="tiny агрессивное сжатие много записей"><td class="ctrl">Tiny</td><td>Агрессивное сжатие</td><td class="why">Когда записей очень много и важен объём</td></tr>
+        </tbody>
+      </table></div>
+
+      <div class="callout warn"><span class="lbl">Правила хорошего промпта</span>
+        <ul>
+          <li>Не убирайте инструкцию «return only JSON / respond with JSON» — по ней плагин парсит ответ.</li>
+          <li>Требуйте соблюдать хронологию и делать наименьшее связное число сводок.</li>
+          <li>Не переписывать блок PREVIOUS — это уже канон вышестоящего уровня.</li>
+          <li><b>keywords</b> — конкретные существительные, объекты, места, имена собственные, характерные действия. НЕ абстрактные эмоции и темы — иначе запись срабатывает невпопад.</li>
+          <li>Игнорировать OOC и чисто декоративные детали, если они не влияют на дальнейшую continuity.</li>
+          <li>Проще всего: в 🧱-менеджере скопировать встроенный пресет (➕ New / Duplicate) и подправить.</li>
+        </ul>
+      </div>
+
+      <div class="callout"><span class="lbl">А промпты уровня Memory?</span>Отдельные воспоминания (tier&nbsp;0) генерируются промптами из <span class="btn-pill">🧩 Summary Prompt Manager</span> — та же дисциплина «строго JSON», но там одна сцена сжимается в одно воспоминание (без member_ids и уровней).</div>
+
+      <div class="callout"><span class="lbl">Как это влияет</span>Правильные уровни и промпты держат контекст лёгким даже на дистанции в тысячи сообщений, а ранние нити не теряются и не дробятся. Запуск — вручную кнопкой <span class="btn-pill">🌈 Consolidate Memories</span> или по авто-запросу, когда уровень «созрел» (см. 3.7).</div>
+    </section>
+
+    <!-- 3 -->
+    <section class="chapter" id="c3" data-search="главное окно настроек">
+      <div class="chapter-head"><span class="chapter-num">03</span><h2 class="chapter-title">Главное окно настроек</h2></div>
+
+      <h3 class="sub">3.1 · Верхний информационный блок</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Элемент</th><th>Что показывает</th></tr></thead>
+        <tbody>
+          <tr data-search="current scene текущая сцена предпросмотр токены спикер"><td class="ctrl">Current Scene<br><span class="code">Текущая сцена</span></td><td>Предпросмотр сцены: сообщения начала/конца, спикеры, отрывки, число сообщений и оценка токенов. Без разметки — жёлтое предупреждение с подсказкой про шевроны.</td></tr>
+          <tr data-search="memory status статус памяти обработано"><td class="ctrl">Memory Status 📊<br><span class="code">Статус памяти</span></td><td>До какого сообщения уже обработана память в этом чате (или «ещё не обрабатывалась»). Показывает, откуда продолжится авто-суммаризация.</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 class="sub">3.2 · Preferences <span class="code">Предпочтения</span></h3>
+      <p class="sub-desc">Чекбоксы, управляющие поведением плагина.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Настройка</th><th>Что делает</th><th>Зачем</th></tr></thead>
+        <tbody>
+          <tr data-search="always use default profile всегда профиль по умолчанию без подтверждения stmb-always-use-default"><td class="ctrl">Always use default profile<span class="code">stmb-always-use-default</span></td><td>Всегда использовать профиль по умолчанию без окна подтверждения</td><td class="why">Пропускает окно подтверждения — память сразу генерируется по профилю по умолчанию. Быстрее, но нет момента сменить профиль или параметры перед запуском. Выключи, если часто переключаешь профили под разные сцены.</td></tr>
+          <tr data-search="show memory previews предпросмотр воспоминаний сайд-промптов stmb-show-memory-previews"><td class="ctrl">Show memory previews<span class="code">stmb-show-memory-previews</span></td><td>Показывать предпросмотр воспоминаний и сайд-промптов от ИИ</td><td class="why">После генерации показывает черновик памяти (и сайд-промптов) — можно вычитать и поправить текст, заголовок и ключи до записи в лорбук. Выключение = полностью автоматический поток без остановок на проверку.</td></tr>
+          <tr data-search="show consolidation previews предпросмотр консолидации сводок stmb-show-consolidation-previews"><td class="ctrl">Show consolidation previews<span class="code">stmb-show-consolidation-previews</span></td><td>Показывать предпросмотр сводных сводок (консолидации)</td><td class="why">То же, но для консолидации: показывает объединённую сводку до записи. Ловишь мусор и выдумки модели, пока они не попали в лорбук. Выключение ускоряет процесс, но убирает этот контроль.</td></tr>
+          <tr data-search="show notifications уведомления toastr stmb-show-notifications"><td class="ctrl">Show notifications<span class="code">stmb-show-notifications</span></td><td>Показывать всплывающие уведомления</td><td class="why">Всплывающие сообщения об успехе, ошибках и этапах. Видно, что реально происходит: память создана, ошибка API, генерация идёт. Выключи, если уведомления отвлекают.</td></tr>
+          <tr data-search="show floating clip button плавающая кнопка выделение stmb-show-floating-clip-button"><td class="ctrl">Show floating Clip button<span class="code">stmb-show-floating-clip-button</span></td><td>Плавающая кнопка «Clip» при выделении текста</td><td class="why">При выделении текста в чате рядом всплывает кнопка «Clip» — мгновенно вырезать выделенное в отдельную запись памяти. Без неё вырезка доступна только через меню.</td></tr>
+          <tr data-search="allow scene overlap перекрытие сцен дубли stmb-allow-scene-overlap"><td class="ctrl">Allow scene overlap<span class="code">stmb-allow-scene-overlap</span></td><td>Разрешить пересечение диапазонов сообщений между воспоминаниями</td><td class="why">По умолчанию два воспоминания не могут покрывать одни и те же сообщения — чтобы одни события не попали в лорбук дважды. Включай, только если намеренно нужны пересекающиеся сцены (например, пересказать тот же кусок под другим углом). Минус — риск дублей и противоречий в лорбуке.</td></tr>
+          <tr data-search="refresh lorebook editor обновлять редактор stmb-refresh-editor"><td class="ctrl">Refresh lorebook editor<span class="code">stmb-refresh-editor</span></td><td>Обновлять редактор лорбука после добавления памяти</td><td class="why">Если открыт редактор World Info — после добавления памяти он сам перечитывается, и новые записи видно сразу, без ручного обновления. Минус — лишний рефреш редактора на каждую память.</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 class="sub">3.3 · Лимиты и контекст</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Настройка</th><th>Что задаёт</th><th>Зачем</th></tr></thead>
+        <tbody>
+          <tr data-search="max response tokens макс токенов ответа сводка stmb-max-tokens"><td class="ctrl">Max Response Tokens<span class="code">stmb-max-tokens</span></td><td>Максимум токенов на сводку-воспоминание (по умолч. 4000)</td><td class="why">Потолок длины сводки-воспоминания. Меньше — короче и дешевле, но теряются детали; больше — подробнее, но дороже, дольше и сильнее раздувает лорбук. 0 = брать лимит из пресета Chat Completion.</td></tr>
+          <tr data-search="token warning threshold порог предупреждения токены 30000 stmb-token-warning-threshold"><td class="ctrl">Token Warning Threshold<span class="code">stmb-token-warning-threshold</span></td><td>Порог предупреждения о больших входных токенах (по умолч. 30 000)</td><td class="why">Если оценка входных токенов сцены выше порога — перед генерацией покажет предупреждение. Страховка от случайно дорогой и долгой генерации на огромной сцене. Подними порог, если часто гонишь большие сцены и предупреждение мешает.</td></tr>
+          <tr data-search="default previous memories count контекст прошлые воспоминания stmb-default-memory-count"><td class="ctrl">Default Previous Memories Count<span class="code">stmb-default-memory-count</span></td><td>Сколько прошлых воспоминаний подмешивать как контекст (0–7)</td><td class="why">Сколько прошлых воспоминаний подмешивать в контекст при создании новой памяти (0–7). Больше — выше связность и меньше противоречий (ИИ помнит предыдущие сводки), но дороже по токенам и риск повторов. 0 — каждая память «с чистого листа».</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 class="sub">3.4 · Regex <span class="code">advanced</span></h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Элемент</th><th>Что делает</th></tr></thead>
+        <tbody>
+          <tr data-search="use regex advanced регулярное выражение stmb-use-regex"><td class="ctrl">Use regex (advanced)<span class="code">stmb-use-regex</span></td><td>Включает применение регулярного выражения к тексту перед генерацией</td></tr>
+          <tr data-search="configure regex настроить регекс stmb-configure-regex"><td class="ctrl">📐 Configure regex…<span class="code">stmb-configure-regex</span></td><td>Открывает выбор/настройку regex (кнопка видна только при включённой галке). Выбранный здесь regex запустится независимо от того, включён он в основном списке ST или нет.</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 class="sub">3.5 · Current Lorebook Configuration <span class="code">лорбук</span></h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Элемент</th><th>Что делает</th><th>Зачем</th></tr></thead>
+        <tbody>
+          <tr data-search="mode режим manual automatic chat-bound stmb-mode-badge"><td class="ctrl">Mode<span class="code">stmb-mode-badge</span></td><td>Текущий режим: <i>Manual</i> или <i>Automatic (Chat-bound)</i></td><td class="why">Показывает, куда сейчас пишутся воспоминания: в привязанный к чату лорбук (Automatic) или в выбранный вручную (Manual). Это первое, что стоит проверить перед созданием памяти — чтобы она не ушла не в тот файл.</td></tr>
+          <tr data-search="active lorebook активный лорбук stmb-active-lorebook"><td class="ctrl">Active Lorebook<span class="code">stmb-active-lorebook</span></td><td>Имя активного лорбука или «None selected»</td><td class="why">Имя файла, куда лягут записи. Если «None selected» — память сохранить не получится, сначала выбери или создай лорбук.</td></tr>
+          <tr data-search="enable manual lorebook mode ручной режим stmb-manual-mode-enabled"><td class="ctrl">Enable Manual Lorebook Mode<span class="code">stmb-manual-mode-enabled</span></td><td>Ручной режим: лорбук выбираете вы, а не привязанный к чату</td><td class="why">Переключает запись с автопривязанного к чату лорбука на выбранный тобой. Позволяет вести один общий лорбук для нескольких чатов или писать в конкретный файл. Взаимоисключающе с Auto-create.</td></tr>
+          <tr data-search="auto-create lorebook автосоздание stmb-auto-create-lorebook"><td class="ctrl">Auto-create lorebook if none exists<span class="code">stmb-auto-create-lorebook</span></td><td>Автоматически создавать и привязывать лорбук к чату, если его нет</td><td class="why">Если у чата нет лорбука — плагин сам создаст и привяжет его при первой памяти. Не нужно готовить лорбук вручную для каждого нового чата; имя берётся из шаблона ниже.</td></tr>
+          <tr data-search="lorebook name template шаблон имени char user chat stmb-lorebook-name-template"><td class="ctrl">Lorebook Name Template<span class="code">stmb-lorebook-name-template</span></td><td>Шаблон имени авто-лорбука. Поддерживает <span class="code">{{char}}</span> <span class="code">{{user}}</span> <span class="code">{{chat}}</span></td><td class="why">Шаблон имени для авто-создаваемых лорбуков с макросами. Имена получаются единообразными и узнаваемыми — файлы разных чатов/персонажей не перепутаешь.</td></tr>
+          <tr data-search="select change manual lorebook выбрать сменить ручной"><td class="ctrl">📕 Select / Change Manual Lorebook</td><td>Выбрать или сменить лорбук вручную (кнопка ручного режима)</td><td class="why">—</td></tr>
+          <tr data-search="clear manual lorebook сбросить ручной"><td class="ctrl">❌ Clear Manual Lorebook</td><td>Сбросить выбранный вручную лорбук</td><td class="why">Появляется, только если он задан</td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout warn"><span class="lbl">Внимание</span>«Manual mode» и «Auto-create» взаимоисключающие — включение одного блокирует другой. Поле шаблона активно только при включённом Auto-create.</div>
+
+      <h3 class="sub">3.6 · Token Saving <span class="code">экономия токенов</span></h3>
+      <p class="sub-desc">Автоматическое скрытие сообщений после создания памяти.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Настройка</th><th>Что делает</th><th>Зачем</th></tr></thead>
+        <tbody>
+          <tr data-search="auto-hide messages скрытие сообщений none all last stmb-auto-hide-mode"><td class="ctrl">Auto-hide messages after adding memory<span class="code">stmb-auto-hide-mode</span></td><td>Список: не скрывать / скрыть всё до последней памяти / скрыть только сообщения последней памяти</td><td class="why">После создания памяти прячет уже «запомненные» сообщения из чата. Экономит контекст: модель не тащит старый текст (его держит память), диалог легче и дешевле. Сообщения не удаляются — их видно как свёрнутые, можно вернуть.</td></tr>
+          <tr data-search="messages to leave unhidden оставить видимыми stmb-unhidden-entries-count"><td class="ctrl">Messages to leave unhidden<span class="code">stmb-unhidden-entries-count</span></td><td>Сколько последних сообщений оставить видимыми (0 = скрыть всё до конца сцены)</td><td class="why">Сколько последних сообщений оставить видимыми при авто-скрытии (0 = скрыть всё до конца сцены). Оставляет «хвост» живого контекста, чтобы модель не теряла нить сразу после сжатия.</td></tr>
+          <tr data-search="unhide hidden messages раскрыть перед генерацией unhide stmb-unhide-before-memory"><td class="ctrl">Unhide hidden messages for memory generation<span class="code">stmb-unhide-before-memory</span></td><td>Перед генерацией временно раскрывает скрытые сообщения (<span class="code">/unhide X-Y</span>)</td><td class="why">Перед генерацией временно раскрывает скрытые сообщения диапазона (/unhide X-Y), поэтому память строится по ПОЛНОМУ тексту сцены, даже если часть была скрыта ради экономии контекста. После генерации скрытие возвращается.</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 class="sub">3.7 · Automatic Memories <span class="code">авто-память</span></h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Настройка</th><th>Что делает</th><th>Зачем</th></tr></thead>
+        <tbody>
+          <tr data-search="auto-create memory summaries nextmemory авто сводки stmb-auto-summary-enabled"><td class="ctrl">Auto-create memory summaries<span class="code">stmb-auto-summary-enabled</span></td><td>Автоматически запускает <span class="code">/nextmemory</span> каждые N сообщений</td><td class="why">Сам запускает <span class="code">/nextmemory</span> каждые N сообщений — память копится без твоего участия. Требует «прайминга»: хотя бы одну память в чате нужно создать вручную, чтобы задать точку отсчёта — иначе рискует сгрести весь прошлый чат в одну гигантскую память.</td></tr>
+          <tr data-search="auto-summary interval интервал stmb-auto-summary-interval"><td class="ctrl">Auto-Summary Interval<span class="code">stmb-auto-summary-interval</span></td><td>Через сколько сообщений создавать авто-сводку (10–200, дефолт 50)</td><td class="why">Каждые сколько сообщений создавать авто-сводку (дефолт 50). Меньше — память подробнее и чаще, но больше вызовов ИИ (дороже); больше — реже и грубее, но экономнее.</td></tr>
+          <tr data-search="auto-summary buffer буфер задержка stmb-auto-summary-buffer"><td class="ctrl">Auto-Summary Buffer<span class="code">stmb-auto-summary-buffer</span></td><td>Задержка авто-сводки на X сообщений (0–50)</td><td class="why">Откладывает авто-сводку на X сообщений после достижения интервала. Не режет сцену на полуслове и захватывает чуть больше контекста, дожидаясь естественной паузы.</td></tr>
+          <tr data-search="prompt for consolidation tier ready запрос консолидации stmb-auto-consolidation-prompt-enabled"><td class="ctrl">Prompt for consolidation when a tier is ready<span class="code">stmb-auto-consolidation-prompt-enabled</span></td><td>Показывает вопрос «да/нет», когда tier набрал достаточно исходных записей</td><td class="why">Когда уровень набрал достаточно исходных записей, показывает вопрос «объединить?». Напоминает вовремя собрать мелкие воспоминания в сводку-арку, чтобы лорбук не разрастался. Без него консолидацию запускаешь вручную.</td></tr>
+          <tr data-search="auto-consolidation tiers уровни мультивыбор stmb-auto-consolidation-target-tier"><td class="ctrl">Auto-Consolidation Tiers<span class="code">stmb-auto-consolidation-target-tier</span></td><td>Мультивыбор уровней (tiers), вызывающих запрос на консолидацию</td><td class="why">Выбор уровней (Арка/Глава/Книга…), для которых показывать запрос на консолидацию. Автоматизируешь только нужные ступени сведения, остальные не трогаются.</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 class="sub">3.8 · Memory Profiles <span class="code">профили</span></h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Элемент</th><th>Что делает</th><th>Зачем</th></tr></thead>
+        <tbody>
+          <tr data-search="memory title format формат заголовка нумерация макросы stmb-title-format-select"><td class="ctrl">Memory Title Format<span class="code">stmb-title-format-select</span></td><td><span class="code">[0]</span><span class="code">[00]</span><span class="code">[000]</span> — авто-нумерация; макросы <span class="code">{{title}}</span> <span class="code">{{scene}}</span> <span class="code">{{char}}</span> <span class="code">{{date}}</span> и др.</td><td class="why">Единый формат заголовков с автонумерацией <span class="code">[000]</span> и макросами. Записи в лорбуке получаются отсортированными и узнаваемыми — легко листать по порядку и находить нужную.</td></tr>
+          <tr data-search="custom title format свой формат stmb-custom-title-format"><td class="ctrl">Custom Title Format…<span class="code">stmb-custom-title-format</span></td><td>Поле своего формата (при выборе «Custom»)</td><td class="why">Своё поле формата, если готовых вариантов не хватает — полный контроль над видом заголовка (свои разделители, порядок макросов и т.п.).</td></tr>
+          <tr data-search="профиль выбор provider model temperature stmb-profile-select"><td class="ctrl">Профиль<span class="code">stmb-profile-select</span></td><td>Выбор активного профиля: провайдер + модель + температура + промпт</td><td class="why">Профиль — это набор «провайдер + модель + температура + промпт». Держишь разные профили под разные задачи (быстрый дешёвый для черновиков, мощный для важных сцен) и переключаешь одним списком, не перенастраивая каждый раз.</td></tr>
+          <tr data-search="profile settings view prompt сводка профиля stmb-profile-summary"><td class="ctrl">Profile Settings + View Prompt<span class="code">stmb-profile-summary</span></td><td>Сводка профиля; раскрывашка <b>View Prompt</b> показывает используемый промпт</td><td class="why">Показывает, чем и как именно генерируется память: модель, параметры и точный текст промпта (раскрывашка View Prompt). Понимаешь и проверяешь настройку до запуска, а не вслепую.</td></tr>
+        </tbody>
+      </table></div>
+
+      <div class="callout" data-search="lorebook entry settings позиция порядок приоритет активация редактор профиля"><span class="lbl">Важно</span>Внутри <span class="btn-pill">✏️ Edit Profile</span> есть блок <b>Lorebook Entry Settings</b> — там задаются режим активации (🔗/🔵/🟢), позиция (↑Char…Outlet), порядок и рекурсия записи. Подробно — в главе <a href="#cp">⚖ «Порядок, позиция и приоритет»</a>.</div>
+
+      <div class="example mini" data-search="пример формат заголовка нумерация результат title">
+        <div class="example-head"><span class="lbl">Пример</span><span class="ttl">Формат заголовка → результат</span></div>
+        <div class="example-body">
+          <div class="flow"><code>[000] - {{title}}</code> <span class="arr">→</span> <span class="code">007 - Сделка у Серого моста</span></div>
+          <div class="flow"><code>[00] · {{char}}: {{title}}</code> <span class="arr">→</span> <span class="code">07 · Лира: Сделка у Серого моста</span></div>
+          <p class="prose" style="margin:8px 0 0;font-size:.9rem"><span class="em">[000]</span> — автонумерация (007, 008…); <span class="em">{{title}}</span> — заголовок от ИИ; <span class="em">{{char}}</span>, <span class="em">{{date}}</span> и др. подставляются сами. Единый формат держит записи в лорбуке отсортированными и узнаваемыми.</p>
+        </div>
+      </div>
+
+      <h3 class="sub">3.8a · Profile Actions <span class="code">действия с профилем</span></h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Кнопка</th><th>Действие</th></tr></thead>
+        <tbody>
+          <tr data-search="set as default профиль по умолчанию"><td class="ctrl">⭐ Set as Default</td><td>Сделать выбранный профиль профилем по умолчанию</td></tr>
+          <tr data-search="edit profile редактировать профиль"><td class="ctrl">✏️ Edit Profile</td><td>Редактировать профиль (модель, температура, промпт)</td></tr>
+          <tr data-search="new profile новый профиль"><td class="ctrl">➕ New Profile</td><td>Создать новый профиль</td></tr>
+          <tr data-search="delete profile удалить профиль"><td class="ctrl">🗑️ Delete Profile</td><td>Удалить выбранный профиль</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 class="sub">3.8b · Extra Function Buttons <span class="code">доп. функции</span></h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Кнопка</th><th>Действие</th></tr></thead>
+        <tbody>
+          <tr data-search="export profiles экспорт json stmb-export-profiles"><td class="ctrl">📤 Export Profiles</td><td>Экспортировать все профили в JSON-файл</td></tr>
+          <tr data-search="import profiles импорт json stmb-import-profiles"><td class="ctrl">📥 Import Profiles</td><td>Импортировать профили из JSON (открывает выбор файла)</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 class="sub">3.8c · Prompt Managers <span class="code">менеджеры промптов</span></h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Кнопка</th><th>Что открывает</th><th>Зачем</th></tr></thead>
+        <tbody>
+          <tr data-search="summary prompt manager менеджер промптов сводок stmb-prompt-manager"><td class="ctrl">🧩 Summary Prompt Manager</td><td>Менеджер промптов для сводок</td><td class="why">Здесь создаёшь и правишь промпты, которыми ИИ пишет память. Управляешь стилем и содержанием сводок: что включать, каким тоном, в каком формате.</td></tr>
+          <tr data-search="consolidation prompt manager менеджер консолидации арки stmb-arc-prompt-manager"><td class="ctrl">🧱 Consolidation Prompt Manager</td><td>Менеджер промптов консолидации</td><td class="why">Промпты, по которым мелкие воспоминания объединяются в «арки»/сводки верхних уровней. Задаёшь, как именно сжимается история при консолидации.</td></tr>
+          <tr data-search="trackers side prompts трекеры сайд-промпты stmb-side-prompts"><td class="ctrl">🎡 Trackers &amp; Side Prompts</td><td>Трекеры и сайд-промпты</td><td class="why">Доп. промпты рядом с сюжетной памятью: по интервалу / после памяти / вручную. Ведут «состояние мира» (статы, инвентарь, отношения) отдельно и свежим, чтобы модель не пересказывала всю историю ради актуального списка.</td></tr>
+          <tr data-search="compaction уплотнение записей stmb-compact-review"><td class="ctrl">📝 Compaction</td><td>Окно уплотнения записей</td><td class="why">Сжать или пересобрать уже существующие записи лорбука. Чистишь раздутые и устаревшие записи — экономишь контекст и убираешь мусор из памяти.</td></tr>
+          <tr data-search="topical clip тематическая вырезка stmb-topical-clip"><td class="ctrl">🔎 Topical Clip</td><td>Тематическая вырезка</td><td class="why">Собрать память по одной конкретной теме или фрагменту (например «всё про персонажа X»). Точечная тематическая запись вместо сводки по времени.</td></tr>
+        </tbody>
+      </table></div>
+
+      <div class="example mini" data-search="пример трекер инвентарь сайд-промпт состояние интервал">
+        <div class="example-head"><span class="lbl">Пример</span><span class="ttl">Трекер «Инвентарь» (сайд-промпт по интервалу)</span></div>
+        <div class="example-body">
+          <p class="prose" style="margin:0 0 8px;font-size:.92rem">Сайд-промпт с триггером «каждые 10 сообщений» ведёт состояние параллельно памяти — например, инвентарь <span class="code">{{user}}</span>:</p>
+          <div class="chat">
+            <div class="msg sys"><span class="who">трекер</span>каждые 10 сообщений обновляет запись:</div>
+            <div class="msg"><span class="who">Инвентарь</span>кинжал «Ветерок», 3 зелья лечения, 87 монет, карта Северного леса</div>
+          </div>
+          <div class="callout"><span class="lbl">Как это влияет</span>Модель всегда «видит» актуальный список и не пересказывает всю историю покупок. В этом роль трекеров/сайд-промптов рядом с сюжетной памятью — они держат «состояние мира» свежим.</div>
+        </div>
+      </div>
+
+      <h3 class="sub">3.9 · Нижние кнопки окна</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Кнопка</th><th>Действие</th></tr></thead>
+        <tbody>
+          <tr data-search="create memory создать воспоминание главное действие"><td class="ctrl">🧠 Create Memory</td><td>Создать воспоминание из размеченной сцены (главное действие). Проверяет, что заданы и начало, и конец</td></tr>
+          <tr data-search="consolidate memories консолидация объединить"><td class="ctrl">🌈 Consolidate Memories</td><td>Открыть окно консолидации — объединить несколько воспоминаний в сводку</td></tr>
+          <tr data-search="clear scene сбросить маркеры"><td class="ctrl">🗑️ Clear Scene</td><td>Сбросить маркеры сцены (start/end)</td></tr>
+          <tr data-search="close закрыть"><td class="ctrl">Close</td><td>Закрыть окно настроек</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- 4 -->
+    <section class="chapter" id="c4" data-search="всплывающие окна попапы диалоги">
+      <div class="chapter-head"><span class="chapter-num">04</span><h2 class="chapter-title">Всплывающие окна (попапы)</h2></div>
+
+      <h3 class="sub">4.1 · Create Memory — подтверждение</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Элемент</th><th>Назначение</th></tr></thead>
+        <tbody>
+          <tr data-search="scene preview предпросмотр сцены"><td class="ctrl">Scene Preview</td><td>Предпросмотр сцены: сообщения, спикеры, оценка токенов</td></tr>
+          <tr data-search="using profile view prompt используемый профиль"><td class="ctrl">Using Profile · View Prompt</td><td>Какой профиль используется, его Model/Temperature и промпт</td></tr>
+          <tr data-search="предупреждение большая сцена токены"><td class="ctrl">⚠️ Предупреждение</td><td>О большой сцене, если токенов много</td></tr>
+          <tr data-search="advanced options расширенные опции подсказка"><td class="ctrl">Advanced Options</td><td>Подсказка: открыть расширенные опции (промпт / контекст / API)</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 class="sub">4.2 · Advanced Memory Options</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Элемент</th><th>Что делает</th></tr></thead>
+        <tbody>
+          <tr data-search="scene information диапазон токены"><td class="ctrl">Scene Information</td><td>Диапазон сообщений и оценка токенов (обновляется динамически)</td></tr>
+          <tr data-search="profile сменить профиль генерации"><td class="ctrl">Profile</td><td>Сменить профиль для этой генерации</td></tr>
+          <tr data-search="memory creation prompt редактировать промпт разово"><td class="ctrl">Memory Creation Prompt</td><td>Разово отредактировать промпт (есть «развернуть редактор» ⤢)</td></tr>
+          <tr data-search="include previous memories контекст прошлые"><td class="ctrl">Include Previous Memories</td><td>Сколько прошлых воспоминаний подмешать (0–7)</td></tr>
+          <tr data-search="api override settings текущие настройки sillytavern"><td class="ctrl">API Override Settings</td><td>Сравнение «профиль vs текущие ST»; галка заменяет модель/температуру профиля на текущие ST</td></tr>
+          <tr data-search="save as new profile сохранить как новый"><td class="ctrl">Save as New Profile</td><td>Сохранить изменённые настройки как новый профиль</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 class="sub">4.3 · Memory Preview — предпросмотр памяти</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Поле</th><th>Назначение</th></tr></thead>
+        <tbody>
+          <tr data-search="memory title заголовок stmb-preview-title"><td class="ctrl">Memory Title</td><td>Заголовок (редактируемый; иногда только для чтения)</td></tr>
+          <tr data-search="memory content текст stmb-preview-content"><td class="ctrl">Memory Content</td><td>Текст воспоминания (редактируемый, есть «развернуть»)</td></tr>
+          <tr data-search="keywords ключевые слова stmb-preview-keywords"><td class="ctrl">Keywords</td><td>Ключевые слова через запятую — по ним лорбук срабатывает в чате</td></tr>
+          <tr data-search="scene information профиль"><td class="ctrl">Scene Information</td><td>Диапазон сообщений и имя профиля</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 class="sub">4.4 · Consolidation Preview — предпросмотр консолидации</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Элемент карточки</th><th>Назначение</th></tr></thead>
+        <tbody>
+          <tr data-search="accept regenerate принять перегенерировать радио"><td class="ctrl">Accept / Regenerate</td><td>Принять сводку или перегенерировать с теми же воспоминаниями</td></tr>
+          <tr data-search="summary title content keywords поля"><td class="ctrl">Title · Content · Keywords</td><td>Редактируемые поля сводки</td></tr>
+          <tr data-search="assigned source memories исходные воспоминания"><td class="ctrl">Assigned source memories</td><td>Раскрывашка: какие исходные воспоминания вошли в сводку</td></tr>
+          <tr data-search="счётчики принятых оставшихся pending banked"><td class="ctrl">Счётчики</td><td>Уже принятых и оставшихся исходных записей</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 class="sub">4.5 · Prompt Manager — менеджеры промптов</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Кнопка</th><th>Действие</th></tr></thead>
+        <tbody>
+          <tr data-search="search presets поиск пресетов stmb-prompt-search"><td class="ctrl">Search presets…</td><td>Поиск по пресетам</td></tr>
+          <tr data-search="new preset создать пресет stmb-pm-new"><td class="ctrl">➕ New Preset</td><td>Создать пресет промпта</td></tr>
+          <tr data-search="export json экспорт stmb-pm-export"><td class="ctrl">📤 Export JSON</td><td>Экспорт пресетов</td></tr>
+          <tr data-search="import json импорт stmb-pm-import"><td class="ctrl">📥 Import JSON</td><td>Импорт пресетов</td></tr>
+          <tr data-search="recreate built-in prompts восстановить встроенные stmb-pm-recreate-builtins"><td class="ctrl">♻️ Recreate Built-in Prompts</td><td>Восстановить встроенные промпты</td></tr>
+          <tr data-search="apply to selected profile применить к профилю stmb-pm-apply"><td class="ctrl">✅ Apply to Selected Profile</td><td>Применить выбранный пресет к активному профилю</td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout warn"><span class="lbl">Внимание</span>Не меняйте инструкции «respond with JSON» в промптах — плагин по ним разбирает ответ ИИ.</div>
+    </section>
+
+    <!-- 5 -->
+    <section class="chapter" id="c5" data-search="слэш команды slash commands">
+      <div class="chapter-head"><span class="chapter-num">05</span><h2 class="chapter-title">Слэш-команды</h2></div>
+      <p class="prose">Команды для чата и скриптов STScript.</p>
+      <div class="cmd-list">
+        <div class="cmd-row" data-search="creatememory создать память сцена"><div class="cmd-key">/creatememory</div><div class="cmd-desc">Создать память из размеченной сцены</div></div>
+        <div class="cmd-row" data-search="scenememory диапазон x-y"><div class="cmd-key">/scenememory X-Y</div><div class="cmd-desc">Задать диапазон и сразу создать память (напр. <span class="code">/scenememory 10-15</span>)</div></div>
+        <div class="cmd-row" data-search="nextmemory от последней памяти"><div class="cmd-key">/nextmemory</div><div class="cmd-desc">Память от конца последней памяти до текущего сообщения</div></div>
+        <div class="cmd-row" data-search="stmb-catchup массово куски interval start end"><div class="cmd-key">/stmb-catchup interval:50 start:0 end:600</div><div class="cmd-desc">Массово создать воспоминания по диапазону кусками</div></div>
+        <div class="cmd-row" data-search="sideprompt сайд-промпт вручную макрос"><div class="cmd-key">/sideprompt "Имя" {{macro}}="значение" [X-Y]</div><div class="cmd-desc">Запустить сайд-промпт вручную</div></div>
+        <div class="cmd-row" data-search="sideprompt-set набор"><div class="cmd-key">/sideprompt-set "Имя" [X-Y]</div><div class="cmd-desc">Запустить набор сайд-промптов</div></div>
+        <div class="cmd-row" data-search="sideprompt-macroset набор макросы"><div class="cmd-key">/sideprompt-macroset "Имя" {{macro}}="значение" [X-Y]</div><div class="cmd-desc">Запустить набор с макросами на лету</div></div>
+        <div class="cmd-row" data-search="sideprompt-on включить all"><div class="cmd-key">/sideprompt-on "Имя" | all</div><div class="cmd-desc">Включить сайд-промпт по имени или все</div></div>
+        <div class="cmd-row" data-search="sideprompt-off выключить all"><div class="cmd-key">/sideprompt-off "Имя" | all</div><div class="cmd-desc">Выключить сайд-промпт по имени или все</div></div>
+        <div class="cmd-row" data-search="stmb-highest индекс обработанного"><div class="cmd-key">/stmb-highest</div><div class="cmd-desc">Показать индекс последнего обработанного сообщения</div></div>
+        <div class="cmd-row" data-search="stmb-set-highest базовая линия none"><div class="cmd-key">/stmb-set-highest &lt;N|none&gt;</div><div class="cmd-desc">Задать «базовую линию» обработки вручную (или сбросить)</div></div>
+        <div class="cmd-row" data-search="stmb-stop остановить генерацию"><div class="cmd-key">/stmb-stop</div><div class="cmd-desc">Остановить все текущие генерации STMB</div></div>
+      </div>
+    </section>
+
+    <!-- 6 -->
+    <section class="chapter" id="c6" data-search="html утилиты конвертер resources standalone">
+      <div class="chapter-head"><span class="chapter-num">06</span><h2 class="chapter-title">Отдельные HTML-утилиты</h2></div>
+      <p class="prose">Самостоятельные страницы в папке <span class="code">resources/</span> — не часть окна плагина, открываются в браузере отдельно.</p>
+
+      <h3 class="sub"><span class="code">lorebookconverter.html</span> — конвертер лорбуков</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Элемент</th><th>Назначение</th></tr></thead>
+        <tbody>
+          <tr data-search="sample title format образец заголовка regex"><td class="ctrl">Sample Title Format</td><td>Образец заголовка; по нему строится regex. Пусто → шаблон «01 - title»</td></tr>
+          <tr data-search="upload lorebook file загрузка json drag drop"><td class="ctrl">Upload Lorebook File</td><td>Загрузка JSON-лорбука (клик или перетаскивание)</td></tr>
+          <tr data-search="convert file пометить stmemorybooks true"><td class="ctrl">Convert File</td><td>Помечает подходящие записи флагом <span class="code">stmemorybooks: true</span> и отдаёт <span class="code">*_converted.json</span></td></tr>
+        </tbody>
+      </table></div>
+      <p class="prose"><b>Зачем:</b> пометить существующие записи лорбука как «воспоминания STMB», чтобы плагин их распознавал.</p>
+
+      <h3 class="sub"><span class="code">stmb-toggle.html</span> — переключение флагов</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Кнопка</th><th>Назначение</th></tr></thead>
+        <tbody>
+          <tr data-search="process delayuntilrecursion preventrecursion флаги"><td class="ctrl">Process</td><td>У записей с <span class="code">stmemorybooks:true</span> меняет <span class="code">delayUntilRecursion</span> false→true и <span class="code">preventRecursion</span> true→false</td></tr>
+          <tr data-search="download modified json скачать"><td class="ctrl">Download Modified JSON</td><td>Скачать изменённый файл</td></tr>
+        </tbody>
+      </table></div>
+      <p class="prose"><b>Зачем:</b> массово починить настройки рекурсии у записей-воспоминаний.</p>
+    </section>
+
+    <!-- 7 -->
+    <section class="chapter" id="c7" data-search="где что лежит индекс файлы структура код архитектура">
+      <div class="chapter-head"><span class="chapter-num">§</span><h2 class="chapter-title">Приложение · где что лежит (индекс файлов)</h2></div>
+
+      <div class="callout warn"><span class="lbl">Важно про рантайм</span>Рантайм-файлов всего три: сам <span class="code">manifest.json</span>, собранный бандл <span class="code">index.build.js</span> и <span class="code">style.build.css</span>. Все остальные <span class="code">*.js</span> ниже — это <b>исходники</b>, которые собираются в бандл командой <span class="code">npx bun run build.ts</span>. Правишь исходник → пересобираешь → ST видит изменения.</div>
+
+      <h3 class="sub">Точка входа и рантайм</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Файл</th><th>Роль</th></tr></thead>
+        <tbody>
+          <tr data-search="manifest json имя версия загрузка"><td class="ctrl"><span class="code">manifest.json</span></td><td>Манифест: имя, версия, какие файлы грузит ST (<span class="code">index.build.js</span> + <span class="code">style.build.css</span>)</td></tr>
+          <tr data-search="index.build.js бандл рантайм"><td class="ctrl"><span class="code">index.build.js</span> (+ <span class="code">.map</span>)</td><td>Собранный бандл — то, что реально исполняется в ST</td></tr>
+          <tr data-search="index.js главный модуль ui попапы слэш команды события"><td class="ctrl"><span class="code">index.js</span></td><td>Главный исходник: панель настроек, попапы, слэш-команды, подписка на события ST, оркестрация всего</td></tr>
+          <tr data-search="style css стили build"><td class="ctrl"><span class="code">style.css</span> / <span class="code">style.build.css</span></td><td>Стили (кнопки маркеров сцены, плавающая кнопка Clip и т.д.)</td></tr>
+          <tr data-search="build ts сборка bun"><td class="ctrl"><span class="code">build.ts</span></td><td>Скрипт сборки бандла (<span class="code">npx bun run build.ts</span>)</td></tr>
+          <tr data-search="bin install hooks postinstall dev"><td class="ctrl"><span class="code">bin/install-hooks.js</span> · <span class="code">bin/postinstall.js</span></td><td>Служебные скрипты установки/git-хуков (dev)</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 class="sub">Конвейер генерации памяти</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Файл</th><th>Роль</th></tr></thead>
+        <tbody>
+          <tr data-search="scenemanager маркеры сцены chat_metadata"><td class="ctrl"><span class="code">sceneManager.js</span></td><td>Маркеры сцены (►/◄), хранение в <span class="code">chat_metadata</span></td></tr>
+          <tr data-search="chatcompile сбор сообщений между маркерами"><td class="ctrl"><span class="code">chatcompile.js</span></td><td>Сбор сообщений между маркерами в структурированный вид</td></tr>
+          <tr data-search="stmemory ядро генерации запрос модель парсинг json регекс creatememory"><td class="ctrl"><span class="code">stmemory.js</span></td><td>Ядро генерации: запрос к модели, применение regex, парсинг JSON-ответа (<span class="code">createMemory</span>, <span class="code">requestCompletion</span>, <span class="code">parseAIJsonResponse</span>)</td></tr>
+          <tr data-search="addlore запись лорбук заголовок позиция порядок активация рекурсия"><td class="ctrl"><span class="code">addlore.js</span></td><td>Запись воспоминания в лорбук: заголовок/нумерация, позиция, order, режим активации, рекурсия</td></tr>
+          <tr data-search="lorebookvalidation валидация перекрытия"><td class="ctrl"><span class="code">lorebookValidation.js</span></td><td>Валидация лорбука/сцены (перекрытия и т.п.)</td></tr>
+          <tr data-search="autocreate авто создание лорбука шаблон имени"><td class="ctrl"><span class="code">autocreate.js</span></td><td>Авто-создание и привязка лорбука (шаблон имени)</td></tr>
+          <tr data-search="autosummary авто суммаризация интервал nextmemory"><td class="ctrl"><span class="code">autosummary.js</span></td><td>Авто-суммаризация по интервалу (автоматический <span class="code">/nextmemory</span>)</td></tr>
+          <tr data-search="stmbjobs очередь заданий блокировка записи"><td class="ctrl"><span class="code">stmbJobs.js</span></td><td>Очередь заданий и блокировки записи (чтобы генерации не конфликтовали)</td></tr>
+          <tr data-search="confirmationpopup подтверждение создания advanced options"><td class="ctrl"><span class="code">confirmationPopup.js</span></td><td>Окно подтверждения «Create Memory» + Advanced Options</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 class="sub">Консолидация</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Файл</th><th>Роль</th></tr></thead>
+        <tbody>
+          <tr data-search="summarytiers уровни memory arc chapter book"><td class="ctrl"><span class="code">summaryTiers.js</span></td><td>Определения уровней (Memory→Arc→…→Epic), минимумы записей</td></tr>
+          <tr data-search="arcanalysis логика консолидации сборка сводок"><td class="ctrl"><span class="code">arcanalysis.js</span></td><td>Логика консолидации: сборка сводок из источников</td></tr>
+          <tr data-search="arcanalysispromptmanager пресеты промптов консолидации"><td class="ctrl"><span class="code">arcAnalysisPromptManager.js</span></td><td>Управление пресетами промптов консолидации</td></tr>
+          <tr data-search="templatesarcprompts встроенные промпты default alternate tiny"><td class="ctrl"><span class="code">templatesArcPrompts.js</span></td><td>Встроенные промпты консолидации (Default / Alternate / Tiny)</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 class="sub">Трекеры / Side Prompts</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Файл</th><th>Роль</th></tr></thead>
+        <tbody>
+          <tr data-search="sideprompts исполнение по триггерам"><td class="ctrl"><span class="code">sidePrompts.js</span></td><td>Исполнение сайд-промптов по триггерам (интервал / после памяти / вручную)</td></tr>
+          <tr data-search="sidepromptsmanager crud шаблоны наборы"><td class="ctrl"><span class="code">sidePromptsManager.js</span></td><td>CRUD шаблонов и наборов сайд-промптов</td></tr>
+          <tr data-search="sidepromptspopup окно trackers side prompts"><td class="ctrl"><span class="code">sidePromptsPopup.js</span></td><td>Окно «Trackers &amp; Side Prompts»</td></tr>
+          <tr data-search="sidepromptmacros макросы парсинг команд"><td class="ctrl"><span class="code">sidePromptMacros.js</span></td><td>Разбор/подстановка макросов, парсинг команд <span class="code">/sideprompt</span></td></tr>
+          <tr data-search="templatessideprompts шаблон таблицы"><td class="ctrl"><span class="code">templatesSidePrompts.js</span></td><td>Шаблон таблицы сайд-промптов</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 class="sub">Профили, промпты сводок, UI-шаблоны</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Файл</th><th>Роль</th></tr></thead>
+        <tbody>
+          <tr data-search="profilemanager профили lorebook entry settings позиция порядок"><td class="ctrl"><span class="code">profileManager.js</span></td><td>Профили + шаблон «Lorebook Entry Settings» (позиция / порядок / активация / рекурсия)</td></tr>
+          <tr data-search="summarypromptmanager пресеты промптов сводок memory"><td class="ctrl"><span class="code">summaryPromptManager.js</span></td><td>Управление пресетами промптов сводок (уровень Memory)</td></tr>
+          <tr data-search="templatessummaryprompts шаблон таблицы пресетов"><td class="ctrl"><span class="code">templatesSummaryPrompts.js</span></td><td>Шаблон таблицы пресетов сводок</td></tr>
+          <tr data-search="clipmanager compaction topical clip плавающая кнопка"><td class="ctrl"><span class="code">clipManager.js</span></td><td>Compaction, Topical Clip и плавающая кнопка Clip</td></tr>
+          <tr data-search="templates главное окно попапы шаблоны handlebars"><td class="ctrl"><span class="code">templates.js</span></td><td>Шаблоны: главное окно настроек и попапы (Confirmation / Advanced / Memory Preview / Consolidation Preview)</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 class="sub">Локализация, утилиты, автономные страницы</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Файл</th><th>Роль</th></tr></thead>
+        <tbody>
+          <tr data-search="locales строки локализации"><td class="ctrl"><span class="code">locales.js</span></td><td>Строки локализации UI</td></tr>
+          <tr data-search="i18nhelpers tr интерполяция"><td class="ctrl"><span class="code">i18nHelpers.js</span></td><td>Хелперы i18n (<span class="code">tr</span>, интерполяция <span class="code">{{var}}</span>)</td></tr>
+          <tr data-search="utils общие утилиты markstmbpopup escapehtml селекторы"><td class="ctrl"><span class="code">utils.js</span></td><td>Общие утилиты (<span class="code">markStmbPopup</span>, <span class="code">withGoBackButton</span>, <span class="code">escapeHtml</span>, селекторы DOM)</td></tr>
+          <tr data-search="constants константы настройки по умолчанию"><td class="ctrl"><span class="code">constants.js</span></td><td>Константы (настройки генерации по умолчанию, ключи и пр.)</td></tr>
+          <tr data-search="resources конвертер лорбуков toggle standalone html"><td class="ctrl"><span class="code">resources/lorebookconverter.html</span><br><span class="code">resources/stmb-toggle.html</span></td><td>Автономные утилиты-конвертеры (открываются в браузере отдельно)</td></tr>
+          <tr data-search="userguides документация переводы"><td class="ctrl"><span class="code">userguides/</span> · <span class="code">USER_GUIDE.md</span></td><td>Пользовательские руководства и переводы</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+  </main>
+</div>
+
+<footer class="foot">
+  <div class="shell">
+    Составлено по коду плагина <code>Memory Books v6.12.0</code> · <code>templates.js</code> + <code>index.js</code>. Интерфейс генерируется в JavaScript, а не в статичных <code>.html</code>-файлах.
+  </div>
+</footer>
+
+<script>
+  (function(){
+    // ── Theme toggle ──
+    var root=document.documentElement, btn=document.getElementById('themeBtn');
+    function sysDark(){ return window.matchMedia && window.matchMedia('(prefers-color-scheme:dark)').matches; }
+    function current(){ return root.getAttribute('data-theme') || (sysDark()?'dark':'light'); }
+    function apply(t){ root.setAttribute('data-theme',t); btn.textContent=(t==='dark'?'☾ Тёмная':'☀ Светлая'); }
+    apply(current());
+    btn.addEventListener('click',function(){ apply(current()==='dark'?'light':'dark'); });
+
+    // ── Scrollspy ──
+    var links=Array.prototype.slice.call(document.querySelectorAll('#tocNav a'));
+    var map={}; links.forEach(function(a){ map[a.getAttribute('href').slice(1)]=a; });
+    var sections=Array.prototype.slice.call(document.querySelectorAll('section.chapter'));
+    function setActive(id){ links.forEach(function(a){ a.classList.toggle('active', a===map[id]); }); }
+    if('IntersectionObserver' in window){
+      var seen={};
+      var io=new IntersectionObserver(function(entries){
+        entries.forEach(function(e){ seen[e.target.id]=e.isIntersecting?e.intersectionRatio:0; });
+        var best=null,bestR=0;
+        sections.forEach(function(s){ var r=seen[s.id]||0; if(r>bestR){bestR=r;best=s.id;} });
+        if(best) setActive(best);
+      },{rootMargin:'-15% 0px -70% 0px',threshold:[0,.25,.5,1]});
+      sections.forEach(function(s){ io.observe(s); });
+    }
+
+    // ── Live filter ──
+    var search=document.getElementById('search');
+    var note=document.getElementById('searchNote');
+    var empty=document.getElementById('emptyState');
+    var rows=Array.prototype.slice.call(document.querySelectorAll('[data-search]'));
+    // rows include both section wrappers and individual tr/cmd-row; separate them
+    var groups=sections;
+    var items=rows.filter(function(el){ return !el.classList.contains('chapter'); });
+
+    function norm(s){ return (s||'').toLowerCase(); }
+    function run(){
+      var q=norm(search.value).trim();
+      if(!q){
+        items.forEach(function(el){ el.classList.remove('hidden'); });
+        groups.forEach(function(g){ g.classList.remove('hidden'); });
+        note.textContent=''; empty.style.display='none';
+        // hide empty sub-tables? none hidden, so nothing to do
+        return;
+      }
+      var visibleItems=0;
+      items.forEach(function(el){
+        var hay=norm(el.getAttribute('data-search'))+' '+norm(el.textContent);
+        var hit=hay.indexOf(q)!==-1;
+        el.classList.toggle('hidden',!hit);
+        if(hit) visibleItems++;
+      });
+      // show a section only if its own text matches OR it has a visible item
+      var visibleGroups=0;
+      groups.forEach(function(g){
+        var gtext=norm(g.getAttribute('data-search'))+' '+norm(g.querySelector('.chapter-title').textContent);
+        var selfHit=gtext.indexOf(q)!==-1;
+        var childVisible=g.querySelector('[data-search]:not(.hidden)')!==null;
+        var showGroup=selfHit||childVisible;
+        g.classList.toggle('hidden',!showGroup);
+        if(showGroup) visibleGroups++;
+        // if group shown only by self match, reveal all its items for context
+        if(selfHit && !childVisible){
+          g.querySelectorAll('[data-search]').forEach(function(el){ el.classList.remove('hidden'); });
+        }
+      });
+      // also hide sub-table wrappers whose every row is hidden (tidy) — optional, skip headings handling
+      note.textContent=visibleItems+' '+declOf(visibleItems);
+      empty.style.display=visibleGroups?'none':'block';
+    }
+    function declOf(n){
+      var a=Math.abs(n)%100, b=n%10;
+      if(a>10&&a<20) return 'совпадений';
+      if(b>1&&b<5) return 'совпадения';
+      if(b===1) return 'совпадение';
+      return 'совпадений';
+    }
+    var t;
+    search.addEventListener('input',function(){ clearTimeout(t); t=setTimeout(run,90); });
+    search.addEventListener('keydown',function(e){ if(e.key==='Escape'){ search.value=''; run(); } });
+  })();
+</script>
+
+<!-- ============================================================
+     Механик машин: подсветка конкретного места по #хешу.
+     Значок «?» в интерфейсе открывает help.html#<id-настройки>,
+     а этот скрипт находит строку с этим id и подсвечивает её.
+     ============================================================ -->
+<style id="mm-help-hl-style">
+  html { scroll-behavior: smooth; }
+  .mm-hl {
+    background: rgba(255, 205, 0, 0.20) !important;
+    box-shadow: inset 4px 0 0 #ffcc00;
+    scroll-margin-top: 24px;
+    animation: mm-hl-flash 1.8s ease-out 1;
+  }
+  @keyframes mm-hl-flash {
+    0%   { background: rgba(255, 205, 0, 0.60) !important; }
+    100% { background: rgba(255, 205, 0, 0.20) !important; }
+  }
+  h2.mm-hl, h3.mm-hl { padding-left: 8px; border-radius: 4px; }
+</style>
+<script>
+(function () {
+  function decodeHash() {
+    var h = (location.hash || '').replace(/^#/, '');
+    try { return decodeURIComponent(h).trim(); } catch (e) { return h.trim(); }
+  }
+  function findTarget(key) {
+    if (!key) return null;
+    var byId = document.getElementById(key);
+    if (byId) return byId;
+    var codes = document.querySelectorAll('.code');
+    for (var i = 0; i < codes.length; i++) {
+      if (codes[i].textContent.trim() === key) {
+        return codes[i].closest('tr') || codes[i].closest('[data-search]') || codes[i];
+      }
+    }
+    var ds = document.querySelectorAll('[data-search]');
+    for (var j = 0; j < ds.length; j++) {
+      if ((ds[j].getAttribute('data-search') || '').indexOf(key) !== -1) return ds[j];
+    }
+    return null;
+  }
+  function highlight() {
+    var key = decodeHash();
+    document.querySelectorAll('.mm-hl').forEach(function (el) { el.classList.remove('mm-hl'); });
+    var t = findTarget(key);
+    if (!t) return;
+    var hiddenAnc = t.closest ? t.closest('.hidden') : null;
+    if (hiddenAnc) hiddenAnc.classList.remove('hidden');
+    void t.offsetWidth;
+    t.classList.add('mm-hl');
+    t.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+  window.addEventListener('hashchange', highlight);
+  if (document.readyState !== 'loading') highlight();
+  else document.addEventListener('DOMContentLoaded', highlight);
+})();
+</script>
