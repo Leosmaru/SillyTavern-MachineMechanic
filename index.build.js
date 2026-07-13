@@ -18213,6 +18213,7 @@ var deferredQueuedAutoHideRanges = /* @__PURE__ */ new Map();
 var autoSummaryJobRetryInFlight = false;
 var DEFAULT_MAX_TOKENS = 4e3;
 var DEFAULT_TITLE_FORMAT = "[000] - {{title}}";
+var MM_DEFAULT_TRANSLATE_PROMPT = "\u041F\u0435\u0440\u0435\u0432\u0435\u0434\u0438 \u0442\u0435\u043A\u0441\u0442 \u043D\u0438\u0436\u0435 \u043D\u0430 \u0440\u0443\u0441\u0441\u043A\u0438\u0439 \u044F\u0437\u044B\u043A. \u0421\u043E\u0445\u0440\u0430\u043D\u0438 \u0441\u043C\u044B\u0441\u043B, \u0441\u0442\u0438\u043B\u044C, \u0444\u043E\u0440\u043C\u0430\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u0438 \u0438\u043C\u0435\u043D\u0430 \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u044B\u0435. \u041D\u0435 \u0434\u043E\u0431\u0430\u0432\u043B\u044F\u0439 \u043F\u043E\u044F\u0441\u043D\u0435\u043D\u0438\u0439, \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u0438\u043B\u0438 \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0435\u0432 \u2014 \u0432\u0435\u0440\u043D\u0438 \u0422\u041E\u041B\u042C\u041A\u041E \u043F\u0435\u0440\u0435\u0432\u043E\u0434.";
 var defaultSettings = {
   moduleSettings: {
     alwaysUseDefault: true,
@@ -18239,6 +18240,10 @@ var defaultSettings = {
     lorebookNameTemplate: "LTM - {{char}} - {{chat}}",
     compactionPromptTemplate: DEFAULT_COMPACTION_PROMPT_TEMPLATE,
     compactionProfileIndex: 0,
+    // Механик машин: перевод сообщений
+    mmTranslatePrompt: MM_DEFAULT_TRANSLATE_PROMPT,
+    mmTranslateProfileIndex: null,
+    // null = тот же профиль, что основной
     useRegex: false,
     selectedRegexOutgoing: [],
     selectedRegexIncoming: [],
@@ -22912,7 +22917,92 @@ function renderInlineActionButtons(container) {
       refreshPopupContent();
     })
   );
+  bar.appendChild(
+    mk("\u{1F310} \u041F\u0435\u0440\u0435\u0432\u043E\u0434 (\u043F\u0440\u043E\u043C\u043F\u0442)", () => {
+      mmOpenTranslateSettings();
+    })
+  );
   container.prepend(bar);
+}
+async function mmTranslateText(text, profileIndexArg = null) {
+  const settings = initializeSettings();
+  const ms = settings.moduleSettings;
+  let idx = profileIndexArg;
+  if (idx == null) {
+    idx = ms.mmTranslateProfileIndex == null ? settings.defaultProfile : ms.mmTranslateProfileIndex;
+  }
+  const profile = settings.profiles[idx] || settings.profiles[settings.defaultProfile] || {};
+  let conn;
+  if (profile.useDynamicSTSettings || profile?.connection?.api === "current_st") {
+    const info = getCurrentApiInfo();
+    const ui = getUIModelSettings();
+    conn = {
+      api: info.completionSource || "openai",
+      model: ui.model || "",
+      temperature: ui.temperature ?? 0.7
+    };
+  } else {
+    conn = resolveEffectiveConnectionFromProfile(profile);
+  }
+  const promptText = ms.mmTranslatePrompt || MM_DEFAULT_TRANSLATE_PROMPT;
+  const fullPrompt = `${promptText}
+
+=== \u0422\u0415\u041A\u0421\u0422 ===
+${text}`;
+  const res = await sendRawCompletionRequest({
+    api: conn.api,
+    model: conn.model,
+    temperature: conn.temperature,
+    endpoint: conn.endpoint,
+    apiKey: conn.apiKey,
+    reverseProxy: !!conn.reverseProxy,
+    prompt: fullPrompt,
+    jsonSchema: null
+  });
+  return String(res && (res.text ?? "") || "").trim();
+}
+async function mmOpenTranslateSettings() {
+  const settings = initializeSettings();
+  const ms = settings.moduleSettings;
+  const curPrompt = ms.mmTranslatePrompt ?? MM_DEFAULT_TRANSLATE_PROMPT;
+  const curProfile = ms.mmTranslateProfileIndex;
+  const profileOptions = settings.profiles.map(
+    (p, i) => `<option value="${i}" ${String(curProfile) === String(i) ? "selected" : ""}>${escapeHtml6(p.name || "\u041F\u0440\u043E\u0444\u0438\u043B\u044C " + i)}</option>`
+  ).join("");
+  const content = `
+    <div class="stmb-box" style="padding:12px; text-align:left;">
+      <h3 class="stmb-section-title">\u{1F310} \u041F\u0435\u0440\u0435\u0432\u043E\u0434 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0439</h3>
+      <label style="display:block; margin:8px 0 4px;">\u041F\u0440\u043E\u043C\u043F\u0442 \u043F\u0435\u0440\u0435\u0432\u043E\u0434\u0430:</label>
+      <textarea id="mm-tr-prompt" class="text_pole" rows="6" style="width:100%;">${escapeHtml6(curPrompt)}</textarea>
+      <label style="display:block; margin:12px 0 4px;">\u041F\u0440\u043E\u0444\u0438\u043B\u044C / \u043C\u043E\u0434\u0435\u043B\u044C:</label>
+      <select id="mm-tr-profile" class="text_pole" style="width:100%;">
+        <option value="" ${curProfile == null ? "selected" : ""}>\u041A\u0430\u043A \u043E\u0441\u043D\u043E\u0432\u043D\u043E\u0439 (\u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E)</option>
+        ${profileOptions}
+      </select>
+      <p style="opacity:.7; font-size:.85em; margin-top:8px;">\u0412 \u0418\u0418 \u0443\u0445\u043E\u0434\u0438\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0442\u0435\u043A\u0441\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u0438 \u044D\u0442\u043E\u0442 \u043F\u0440\u043E\u043C\u043F\u0442 \u2014 \u0431\u0435\u0437 \u043E\u0441\u0442\u0430\u043B\u044C\u043D\u043E\u0439 \u0438\u0441\u0442\u043E\u0440\u0438\u0438 \u0447\u0430\u0442\u0430.</p>
+      <div class="stmb-button-row" style="margin-top:10px;">
+        <div class="menu_button" id="mm-tr-reset">\u21A9 \u0421\u0431\u0440\u043E\u0441\u0438\u0442\u044C \u043F\u0440\u043E\u043C\u043F\u0442</div>
+      </div>
+    </div>`;
+  const popup = new Popup9(content, POPUP_TYPE9.TEXT, "", {
+    okButton: "\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C",
+    cancelButton: "\u041E\u0442\u043C\u0435\u043D\u0430",
+    wide: true
+  });
+  popup.dlg.addEventListener("click", (e) => {
+    if (e.target && e.target.id === "mm-tr-reset") {
+      const ta = popup.dlg.querySelector("#mm-tr-prompt");
+      if (ta) ta.value = MM_DEFAULT_TRANSLATE_PROMPT;
+    }
+  });
+  const res = await popup.show();
+  if (res !== POPUP_RESULT9.AFFIRMATIVE) return;
+  const prompt = popup.dlg.querySelector("#mm-tr-prompt")?.value ?? "";
+  const profVal = popup.dlg.querySelector("#mm-tr-profile")?.value ?? "";
+  ms.mmTranslatePrompt = prompt.trim() || MM_DEFAULT_TRANSLATE_PROMPT;
+  ms.mmTranslateProfileIndex = profVal === "" ? null : parseInt(profVal, 10);
+  saveSettingsDebounced6();
+  toastr.success("\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u043F\u0435\u0440\u0435\u0432\u043E\u0434\u0430 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u044B", "\u041C\u0435\u0445\u0430\u043D\u0438\u043A \u043C\u0430\u0448\u0438\u043D");
 }
 async function showSettingsPopup() {
   const settings = initializeSettings();
@@ -24975,6 +25065,8 @@ export {
   currentProfile,
   isMemoryProcessing,
   mmOpenInline,
+  mmOpenTranslateSettings,
+  mmTranslateText,
   validateLorebook
 };
 /*! Bundled license information:

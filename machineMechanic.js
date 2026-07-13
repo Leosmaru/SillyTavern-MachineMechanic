@@ -9,7 +9,7 @@
 // убирают сообщение — чат встаёт как был.
 // ============================================================================
 
-import { mmOpenInline } from "./index.build.js";
+import { mmOpenInline, mmTranslateText } from "./index.build.js";
 
 const PANEL_ID = "mm-panel";
 const BUTTON_ID = "mm-wand-button";
@@ -172,9 +172,65 @@ async function openPanel() {
     }
 }
 
+// ----------------------------------------------------------------------------
+// Значок «перевод ИИ» над каждым сообщением (рядом с переводом SillyTavern)
+// ----------------------------------------------------------------------------
+
+/** Добавляет кнопку перевода в блок кнопок сообщения (если её ещё нет). */
+function addTranslateButton(mes) {
+    const extra = mes.querySelector(".extraMesButtons");
+    if (!extra || extra.querySelector(".mm-translate-btn")) return;
+    const btn = document.createElement("div");
+    btn.className = "mes_button mm-translate-btn fa-solid fa-globe interactable";
+    btn.title = "Перевести это сообщение (ИИ)";
+    btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        translateMessage(mes);
+    });
+    const stTranslate = extra.querySelector(".mes_translate");
+    if (stTranslate) stTranslate.after(btn);
+    else extra.prepend(btn);
+}
+
+/** Переводит текст сообщения и показывает результат под ним (повторный клик — убрать). */
+async function translateMessage(mes) {
+    const textEl = mes.querySelector(".mes_text");
+    if (!textEl) return;
+    const existing = mes.querySelector(".mm-translation");
+    if (existing) { existing.remove(); return; } // переключатель
+
+    const block = document.createElement("div");
+    block.className = "mm-translation";
+    block.textContent = "Перевод…";
+    textEl.after(block);
+    try {
+        const src = textEl.innerText || textEl.textContent || "";
+        const translated = await mmTranslateText(src);
+        block.textContent = translated || "(пустой ответ)";
+    } catch (err) {
+        console.error("[Механик машин] Ошибка перевода:", err);
+        block.textContent = "Ошибка перевода: " + (err && err.message ? err.message : err);
+        block.classList.add("mm-translation-error");
+    }
+}
+
+/** Ставит кнопки перевода на все сообщения и следит за новыми. */
+function watchTranslateButtons() {
+    const chat = document.getElementById("chat");
+    if (!chat) return;
+    chat.querySelectorAll(".mes").forEach(addTranslateButton);
+    // childList без subtree — реагируем на добавление/удаление сообщений,
+    // но не на нашу же вставку кнопки внутрь сообщения (нет самозапуска).
+    new MutationObserver(() => {
+        chat.querySelectorAll(".mes").forEach(addTranslateButton);
+    }).observe(chat, { childList: true });
+}
+
 jQuery(() => {
     createToolbarButton();
     $(document).on("click", `#${BUTTON_ID}`, openPanel);
     $(document).on("click", `#${PANEL_ID} .mm-close`, closePanel);
-    console.log("[Механик машин] Готово: 🔧 рисует интерфейс приложения в чате.");
+    watchTranslateButtons();
+    console.log("[Механик машин] Готово: 🔧 интерфейс + 🌐 перевод сообщений.");
 });

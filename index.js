@@ -36,7 +36,7 @@ import {
   validateCompiledScene,
   getSceneStats,
 } from "./chatcompile.js";
-import { createMemory, parseAIJsonResponse } from "./stmemory.js";
+import { createMemory, parseAIJsonResponse, sendRawCompletionRequest } from "./stmemory.js";
 import {
   addMemoryToLorebook,
   DEFAULT_LOREBOOK_ENTRY_SETTINGS,
@@ -101,6 +101,7 @@ import {
   markStmbPopup,
   throwIfStmbStopped,
   withGoBackButton,
+  resolveEffectiveConnectionFromProfile,
 } from "./utils.js";
 import * as SummaryPromptManager from "./summaryPromptManager.js";
 import {
@@ -346,6 +347,10 @@ const SUPPORTED_COMPLETION_SOURCES = [
 const DEFAULT_MAX_TOKENS = 4000;
 const DEFAULT_TITLE_FORMAT = "[000] - {{title}}";
 
+// Механик машин: промпт перевода по умолчанию (редактируется в настройках).
+const MM_DEFAULT_TRANSLATE_PROMPT =
+  "Переведи текст ниже на русский язык. Сохрани смысл, стиль, форматирование и имена собственные. Не добавляй пояснений, заметок или комментариев — верни ТОЛЬКО перевод.";
+
 const defaultSettings = {
   moduleSettings: {
     alwaysUseDefault: true,
@@ -372,6 +377,9 @@ const defaultSettings = {
     lorebookNameTemplate: "LTM - {{char}} - {{chat}}",
     compactionPromptTemplate: DEFAULT_COMPACTION_PROMPT_TEMPLATE,
     compactionProfileIndex: 0,
+    // Механик машин: перевод сообщений
+    mmTranslatePrompt: MM_DEFAULT_TRANSLATE_PROMPT,
+    mmTranslateProfileIndex: null, // null = тот же профиль, что основной
     useRegex: false,
     selectedRegexOutgoing: [],
     selectedRegexIncoming: [],
@@ -6233,7 +6241,113 @@ function renderInlineActionButtons(container) {
     }),
   );
 
+  bar.appendChild(
+    mk("🌐 Перевод (промпт)", () => {
+      mmOpenTranslateSettings();
+    }),
+  );
+
   container.prepend(bar);
+}
+
+/**
+ * Механик машин: перевести текст через ИИ.
+ * В контекст идёт ТОЛЬКО текст + промпт перевода (без истории чата).
+ * @param {string} text — исходный текст
+ * @param {number|null} [profileIndexArg] — профиль; null = из настроек / основной
+ */
+export async function mmTranslateText(text, profileIndexArg = null) {
+  const settings = initializeSettings();
+  const ms = settings.moduleSettings;
+  let idx = profileIndexArg;
+  if (idx == null) {
+    idx = ms.mmTranslateProfileIndex == null ? settings.defaultProfile : ms.mmTranslateProfileIndex;
+  }
+  const profile = settings.profiles[idx] || settings.profiles[settings.defaultProfile] || {};
+
+  let conn;
+  if (profile.useDynamicSTSettings || profile?.connection?.api === "current_st") {
+    const info = getCurrentApiInfo();
+    const ui = getUIModelSettings();
+    conn = {
+      api: info.completionSource || "openai",
+      model: ui.model || "",
+      temperature: ui.temperature ?? 0.7,
+    };
+  } else {
+    conn = resolveEffectiveConnectionFromProfile(profile);
+  }
+
+  const promptText = ms.mmTranslatePrompt || MM_DEFAULT_TRANSLATE_PROMPT;
+  const fullPrompt = `${promptText}\n\n=== ТЕКСТ ===\n${text}`;
+
+  const res = await sendRawCompletionRequest({
+    api: conn.api,
+    model: conn.model,
+    temperature: conn.temperature,
+    endpoint: conn.endpoint,
+    apiKey: conn.apiKey,
+    reverseProxy: !!conn.reverseProxy,
+    prompt: fullPrompt,
+    jsonSchema: null,
+  });
+  return String((res && (res.text ?? "")) || "").trim();
+}
+
+/**
+ * Механик машин: окно редактирования промпта перевода и выбора профиля/модели.
+ */
+export async function mmOpenTranslateSettings() {
+  const settings = initializeSettings();
+  const ms = settings.moduleSettings;
+  const curPrompt = ms.mmTranslatePrompt ?? MM_DEFAULT_TRANSLATE_PROMPT;
+  const curProfile = ms.mmTranslateProfileIndex;
+
+  const profileOptions = settings.profiles
+    .map(
+      (p, i) =>
+        `<option value="${i}" ${String(curProfile) === String(i) ? "selected" : ""}>${escapeHtml(p.name || "Профиль " + i)}</option>`,
+    )
+    .join("");
+
+  const content = `
+    <div class="stmb-box" style="padding:12px; text-align:left;">
+      <h3 class="stmb-section-title">🌐 Перевод сообщений</h3>
+      <label style="display:block; margin:8px 0 4px;">Промпт перевода:</label>
+      <textarea id="mm-tr-prompt" class="text_pole" rows="6" style="width:100%;">${escapeHtml(curPrompt)}</textarea>
+      <label style="display:block; margin:12px 0 4px;">Профиль / модель:</label>
+      <select id="mm-tr-profile" class="text_pole" style="width:100%;">
+        <option value="" ${curProfile == null ? "selected" : ""}>Как основной (по умолчанию)</option>
+        ${profileOptions}
+      </select>
+      <p style="opacity:.7; font-size:.85em; margin-top:8px;">В ИИ уходит только текст сообщения и этот промпт — без остальной истории чата.</p>
+      <div class="stmb-button-row" style="margin-top:10px;">
+        <div class="menu_button" id="mm-tr-reset">↩ Сбросить промпт</div>
+      </div>
+    </div>`;
+
+  const popup = new Popup(content, POPUP_TYPE.TEXT, "", {
+    okButton: "Сохранить",
+    cancelButton: "Отмена",
+    wide: true,
+  });
+
+  popup.dlg.addEventListener("click", (e) => {
+    if (e.target && e.target.id === "mm-tr-reset") {
+      const ta = popup.dlg.querySelector("#mm-tr-prompt");
+      if (ta) ta.value = MM_DEFAULT_TRANSLATE_PROMPT;
+    }
+  });
+
+  const res = await popup.show();
+  if (res !== POPUP_RESULT.AFFIRMATIVE) return;
+
+  const prompt = popup.dlg.querySelector("#mm-tr-prompt")?.value ?? "";
+  const profVal = popup.dlg.querySelector("#mm-tr-profile")?.value ?? "";
+  ms.mmTranslatePrompt = prompt.trim() || MM_DEFAULT_TRANSLATE_PROMPT;
+  ms.mmTranslateProfileIndex = profVal === "" ? null : parseInt(profVal, 10);
+  saveSettingsDebounced();
+  toastr.success("Настройки перевода сохранены", "Механик машин");
 }
 
 /**

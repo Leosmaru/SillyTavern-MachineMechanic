@@ -588,3 +588,19 @@
 .stmb_floating_clip_arrow:active {
   transform: translateY(1px);
 }
+.mm-translate-btn {
+  cursor: pointer;
+}
+.mm-translation {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--SmartThemeQuoteColor, #7096b8);
+  background: color-mix(in srgb, var(--SmartThemeQuoteColor, #7096b8) 8%, transparent);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  opacity: 0.95;
+}
+.mm-translation-error {
+  border-left-color: #e57373;
+  color: #e57373;
+}
