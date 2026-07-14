@@ -357,7 +357,7 @@ const MM_DEFAULT_DICE_PROMPT_SF =
   "You MUST strictly obey the dice outcome for the last attempted action. It is a hard rule, not a suggestion. FAILURE means the action clearly does NOT work — never write it as a success or partial success; show it going wrong with a real, immediate consequence. SUCCESS means it works well. Do not mention the roll or dice in the reply.";
 // Промпт режима «Кубик (число)» — с описанием критичности чисел.
 const MM_DEFAULT_DICE_PROMPT_NUM =
-  "You MUST strictly obey the d20 dice result for the last attempted action. Scale the outcome to the number: 1-3 = CRITICAL failure (its consequences can be extreme — up to and including the death of {{user}} if the context allows it), 4-10 = failure, 11-15 = success, 16-19 = strong success, 20 = critical triumph. The lower the number the worse and more critical; the higher the better and more impressive. Never soften a low roll into a success. Do not mention the roll, dice, or numbers in the reply.";
+  "You MUST strictly obey the d20 dice result for the last attempted action. Scale the outcome to the number: 1 = catastrophic failure, 2-5 = severe failure, 6-10 = failure, 11-15 = success, 16-19 = strong success, 20 = critical triumph. The lower the number the worse and more critical; the higher the better and more impressive. Never soften a low roll into a success. Do not mention the roll, dice, or numbers in the reply.";
 
 const defaultSettings = {
   moduleSettings: {
