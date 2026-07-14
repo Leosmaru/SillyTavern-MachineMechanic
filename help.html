@@ -288,6 +288,7 @@
       <nav class="toc-nav" id="tocNav">
         <a href="#c1"><span class="n">1</span><span>Как открыть плагин</span></a>
         <a href="#c2"><span class="n">2</span><span>Разметка сцены в чате</span></a>
+        <a href="#cmm"><span class="n">★</span><span>Механик машин — надстройки</span></a>
         <a href="#cx"><span class="n">▶</span><span>Ролеплей-пример</span></a>
         <a href="#cu"><span class="n">◆</span><span>Для каких целей</span></a>
         <a href="#cp"><span class="n">⚖</span><span>Порядок и приоритет</span></a>
@@ -614,6 +615,46 @@
       <div class="callout"><span class="lbl">А промпты уровня Memory?</span>Отдельные воспоминания (tier&nbsp;0) генерируются промптами из <span class="btn-pill">🧩 Summary Prompt Manager</span> — та же дисциплина «строго JSON», но там одна сцена сжимается в одно воспоминание (без member_ids и уровней).</div>
 
       <div class="callout"><span class="lbl">Как это влияет</span>Правильные уровни и промпты держат контекст лёгким даже на дистанции в тысячи сообщений, а ранние нити не теряются и не дробятся. Запуск — вручную кнопкой <span class="btn-pill">🌈 Consolidate Memories</span> или по авто-запросу, когда уровень «созрел» (см. 3.7).</div>
+    </section>
+
+    <!-- Механик машин -->
+    <section class="chapter" id="cmm" data-search="механик машин надстройки значок ключ интерфейс в чате перевод нейропереводчик кубик бросок справка знак вопроса маркеры сцены шапка стрелки ножницы клип автономно русский">
+      <div class="chapter-head"><span class="chapter-num">★</span><h2 class="chapter-title">Механик машин — надстройки</h2></div>
+      <p class="sub-desc">Чем эта сборка отличается от оригинала Memory Books. Работает автономно (отдельная Memory Books не нужна), интерфейс принудительно на русском.</p>
+
+      <h3 class="sub">Значок 🔧 и интерфейс в чате</h3>
+      <p class="prose">Рядом с волшебной палочкой стоит иконка-ключ <b>🔧</b>. Клик рисует <b>прямо в ленте чата, как сообщение</b>, полный интерфейс приложения (профили, настройки, кнопки). Крестик × или «Закрыть» убирают его. Родное модальное окно тоже доступно.</p>
+
+      <h3 class="sub">Значки «?» — контекстная справка</h3>
+      <p class="prose">У каждой настройки стоит «<b>?</b>». Клик открывает эту справку <b>в новой вкладке</b> сразу на нужном месте и подсвечивает именно ту строку.</p>
+
+      <h3 class="sub">Маркеры сцены ◄► в шапке сообщения</h3>
+      <p class="prose">Стрелки отметки сцены вынесены в <b>видимую шапку каждого сообщения</b> (слева от имени), а не спрятаны в меню «…» — на телефоне легко добраться. ▶ — начало сцены, ◀ — конец, затем «Создать память».</p>
+      <div class="callout"><span class="lbl">Не путать</span>Стрелки ◄► <b>в шапке сообщения</b> — это сцена (для памяти). Стрелки ◄► <b>у плавающих ножниц</b> при выделении текста — расширение выделения для «Clip», к сцене отношения не имеют.</div>
+
+      <h3 class="sub">🌐 Перевод сообщений</h3>
+      <p class="sub-desc">Значок <b>🌐</b> в кнопках сообщения (рядом с переводом ST) переводит его через ИИ и рисует перевод под сообщением. Повторный клик убирает. Настройки — в панели, кнопка «🌐 Перевод (промпт)».</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Настройка</th><th>Что делает</th></tr></thead>
+        <tbody>
+          <tr data-search="перевод промпт системный изоляция"><td class="ctrl">Промпт перевода</td><td>Единственный системный промпт переводчика. В ИИ уходит только текст сообщения + этот промпт (без истории чата — в изоляции).</td></tr>
+          <tr data-search="перевод профиль подключения модель deepseek magnum"><td class="ctrl">Профиль / модель</td><td>Профиль подключения SillyTavern (DeepSeek, Magnum и т.д.). Берётся только соединение и модель, без чужих промптов и порядка.</td></tr>
+          <tr data-search="перевод своя температура галочка"><td class="ctrl">Своя температура</td><td>Галка вкл — перевод берёт эту температуру; выкл — температуру профиля.</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3 class="sub">🎲 Кубик</h3>
+      <p class="sub-desc">Кнопка <b>🎲 Кубик</b> в панели: галочка на кнопке — вкл/выкл режим, клик по тексту — меню. Свой генератор случайных чисел. При включённом режиме перед каждым ответом ИИ кидается кубик: результат скрыто уходит в промпт (ИИ учитывает исход) и показывается <b>над сообщением</b>, пока ИИ пишет.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Пункт меню</th><th>Что делает</th></tr></thead>
+        <tbody>
+          <tr data-search="кубик режим число успех провал"><td class="ctrl">Режим</td><td>Два раздельных: <b>Кубик (число d20)</b> — число со шкалой критичности; <b>Успех / Провал</b> — только бинарный исход.</td></tr>
+          <tr data-search="кубик промпт режима"><td class="ctrl">Промпт</td><td>У каждого режима свой промпт (как ИИ трактует бросок); меняется вместе с режимом.</td></tr>
+          <tr data-search="кубик следующий бросок форс успех провал число одноразово"><td class="ctrl">Следующий бросок (одноразово)</td><td>Форс следующего броска: Обычный / Успех / Провал / Число (1–20). Применится к следующему ответу и сбросится.</td></tr>
+          <tr data-search="кубик бросить сейчас тест"><td class="ctrl">🎲 Бросить сейчас</td><td>Тестовый бросок под последним сообщением.</td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout"><span class="lbl">Критичность</span>В режиме числа исход масштабируется: 1 — критический провал (в инъекции — вплоть до смерти <span class="code">{{user}}</span>, если позволяет контекст) … 20 — критический триумф.</div>
     </section>
 
     <!-- 3 -->
@@ -1066,60 +1107,32 @@
   })();
 </script>
 
-<!-- ============================================================
-     Механик машин: подсветка конкретного места по #хешу.
-     Значок «?» в интерфейсе открывает help.html#<id-настройки>,
-     а этот скрипт находит строку с этим id и подсвечивает её.
-     ============================================================ -->
 <style id="mm-help-hl-style">
   html { scroll-behavior: smooth; }
-  .mm-hl {
-    background: rgba(255, 205, 0, 0.20) !important;
-    box-shadow: inset 4px 0 0 #ffcc00;
-    scroll-margin-top: 24px;
-    animation: mm-hl-flash 1.8s ease-out 1;
-  }
-  @keyframes mm-hl-flash {
-    0%   { background: rgba(255, 205, 0, 0.60) !important; }
-    100% { background: rgba(255, 205, 0, 0.20) !important; }
-  }
+  .mm-hl { background: rgba(255,205,0,0.20) !important; box-shadow: inset 4px 0 0 #ffcc00; scroll-margin-top: 24px; animation: mm-hl-flash 1.8s ease-out 1; }
+  @keyframes mm-hl-flash { 0%{background:rgba(255,205,0,0.60)!important;} 100%{background:rgba(255,205,0,0.20)!important;} }
   h2.mm-hl, h3.mm-hl { padding-left: 8px; border-radius: 4px; }
 </style>
 <script>
 (function () {
-  function decodeHash() {
-    var h = (location.hash || '').replace(/^#/, '');
-    try { return decodeURIComponent(h).trim(); } catch (e) { return h.trim(); }
-  }
-  function findTarget(key) {
-    if (!key) return null;
-    var byId = document.getElementById(key);
-    if (byId) return byId;
-    var codes = document.querySelectorAll('.code');
-    for (var i = 0; i < codes.length; i++) {
-      if (codes[i].textContent.trim() === key) {
-        return codes[i].closest('tr') || codes[i].closest('[data-search]') || codes[i];
-      }
-    }
-    var ds = document.querySelectorAll('[data-search]');
-    for (var j = 0; j < ds.length; j++) {
-      if ((ds[j].getAttribute('data-search') || '').indexOf(key) !== -1) return ds[j];
-    }
+  function decodeHash(){ var h=(location.hash||'').replace(/^#/,''); try{return decodeURIComponent(h).trim();}catch(e){return h.trim();} }
+  function findTarget(key){
+    if(!key) return null;
+    var byId=document.getElementById(key); if(byId) return byId;
+    var codes=document.querySelectorAll('.code');
+    for(var i=0;i<codes.length;i++){ if(codes[i].textContent.trim()===key) return codes[i].closest('tr')||codes[i].closest('[data-search]')||codes[i]; }
+    var ds=document.querySelectorAll('[data-search]');
+    for(var j=0;j<ds.length;j++){ if((ds[j].getAttribute('data-search')||'').indexOf(key)!==-1) return ds[j]; }
     return null;
   }
-  function highlight() {
-    var key = decodeHash();
-    document.querySelectorAll('.mm-hl').forEach(function (el) { el.classList.remove('mm-hl'); });
-    var t = findTarget(key);
-    if (!t) return;
-    var hiddenAnc = t.closest ? t.closest('.hidden') : null;
-    if (hiddenAnc) hiddenAnc.classList.remove('hidden');
-    void t.offsetWidth;
-    t.classList.add('mm-hl');
-    t.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  function highlight(){
+    var key=decodeHash();
+    document.querySelectorAll('.mm-hl').forEach(function(el){el.classList.remove('mm-hl');});
+    var t=findTarget(key); if(!t) return;
+    var h=t.closest?t.closest('.hidden'):null; if(h) h.classList.remove('hidden');
+    void t.offsetWidth; t.classList.add('mm-hl'); t.scrollIntoView({block:'center',behavior:'smooth'});
   }
   window.addEventListener('hashchange', highlight);
-  if (document.readyState !== 'loading') highlight();
-  else document.addEventListener('DOMContentLoaded', highlight);
+  if(document.readyState!=='loading') highlight(); else document.addEventListener('DOMContentLoaded', highlight);
 })();
 </script>
