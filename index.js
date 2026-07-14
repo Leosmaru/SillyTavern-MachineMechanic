@@ -353,7 +353,7 @@ const MM_DEFAULT_TRANSLATE_PROMPT =
 
 // Механик машин: промпт поведения ИИ на бросок кубика (редактируется в настройках).
 const MM_DEFAULT_DICE_PROMPT =
-  "The character's action is resolved by a d20 roll: 11 or higher is a success, lower is a failure. On a success the action works out; on a failure introduce a complication or setback. Weave the outcome naturally into the narration without stating the number.";
+  "You MUST strictly obey the dice outcome for the last attempted action. It is a hard rule, not a suggestion. FAILURE = the action clearly does NOT work: never write it as a success or partial success — show it going wrong with a real, immediate consequence. SUCCESS = it works well. Do not mention the roll, dice, or numbers in the reply.";
 
 const defaultSettings = {
   moduleSettings: {
@@ -6457,10 +6457,11 @@ export function mmOnGenerationStart(type, _options, dryRun) {
   mmLastRoll = r;
   const mode = ms.mmDiceMode || "dice";
   const prompt = ms.mmDicePrompt || MM_DEFAULT_DICE_PROMPT;
-  const outcome = mode === "successfail"
-    ? `Action outcome roll: ${r.success ? "SUCCESS" : "FAILURE"}.`
-    : `Dice roll: d20 = ${r.n} (${r.success ? "success" : "failure"}).`;
-  const injection = `[${prompt}\n${outcome}]`;
+  const num = mode === "successfail" ? "" : ` (d20=${r.n})`;
+  const outcome = r.success
+    ? `ACTION ROLL: SUCCESS${num}. The last attempted action clearly SUCCEEDS.`
+    : `ACTION ROLL: FAILURE${num}. The last attempted action clearly FAILS — do NOT let it succeed or partially succeed; show it going wrong with a real negative consequence.`;
+  const injection = `[Dice mechanic — obey strictly. ${prompt}\n>>> ${outcome} <<<]`;
   try {
     // IN_CHAT (1), глубина 0, роль SYSTEM (0) — видит только модель, в чат не пишется.
     SillyTavern.getContext().setExtensionPrompt("MM_DICE_ROLL", injection, 1, 0, false, 0);

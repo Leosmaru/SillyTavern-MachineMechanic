@@ -18214,7 +18214,7 @@ var autoSummaryJobRetryInFlight = false;
 var DEFAULT_MAX_TOKENS = 4e3;
 var DEFAULT_TITLE_FORMAT = "[000] - {{title}}";
 var MM_DEFAULT_TRANSLATE_PROMPT = "\u041F\u0435\u0440\u0435\u0432\u0435\u0434\u0438 \u0442\u0435\u043A\u0441\u0442 \u043D\u0438\u0436\u0435 \u043D\u0430 \u0440\u0443\u0441\u0441\u043A\u0438\u0439 \u044F\u0437\u044B\u043A. \u0421\u043E\u0445\u0440\u0430\u043D\u0438 \u0441\u043C\u044B\u0441\u043B, \u0441\u0442\u0438\u043B\u044C, \u0444\u043E\u0440\u043C\u0430\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u0438 \u0438\u043C\u0435\u043D\u0430 \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u044B\u0435. \u041D\u0435 \u0434\u043E\u0431\u0430\u0432\u043B\u044F\u0439 \u043F\u043E\u044F\u0441\u043D\u0435\u043D\u0438\u0439, \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u0438\u043B\u0438 \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0435\u0432 \u2014 \u0432\u0435\u0440\u043D\u0438 \u0422\u041E\u041B\u042C\u041A\u041E \u043F\u0435\u0440\u0435\u0432\u043E\u0434.";
-var MM_DEFAULT_DICE_PROMPT = "The character's action is resolved by a d20 roll: 11 or higher is a success, lower is a failure. On a success the action works out; on a failure introduce a complication or setback. Weave the outcome naturally into the narration without stating the number.";
+var MM_DEFAULT_DICE_PROMPT = "You MUST strictly obey the dice outcome for the last attempted action. It is a hard rule, not a suggestion. FAILURE = the action clearly does NOT work: never write it as a success or partial success \u2014 show it going wrong with a real, immediate consequence. SUCCESS = it works well. Do not mention the roll, dice, or numbers in the reply.";
 var defaultSettings = {
   moduleSettings: {
     alwaysUseDefault: true,
@@ -23096,9 +23096,10 @@ function mmOnGenerationStart(type, _options, dryRun) {
   mmLastRoll = r;
   const mode = ms.mmDiceMode || "dice";
   const prompt = ms.mmDicePrompt || MM_DEFAULT_DICE_PROMPT;
-  const outcome = mode === "successfail" ? `Action outcome roll: ${r.success ? "SUCCESS" : "FAILURE"}.` : `Dice roll: d20 = ${r.n} (${r.success ? "success" : "failure"}).`;
-  const injection = `[${prompt}
-${outcome}]`;
+  const num = mode === "successfail" ? "" : ` (d20=${r.n})`;
+  const outcome = r.success ? `ACTION ROLL: SUCCESS${num}. The last attempted action clearly SUCCEEDS.` : `ACTION ROLL: FAILURE${num}. The last attempted action clearly FAILS \u2014 do NOT let it succeed or partially succeed; show it going wrong with a real negative consequence.`;
+  const injection = `[Dice mechanic \u2014 obey strictly. ${prompt}
+>>> ${outcome} <<<]`;
   try {
     SillyTavern.getContext().setExtensionPrompt("MM_DICE_ROLL", injection, 1, 0, false, 0);
   } catch (e) {
