@@ -782,3 +782,18 @@
 
 /* Механик машин — заблокированное поле числа кубика */
 .stmb-popup .text_pole:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Механик машин — всегда видимые маркеры сцены (◄►) в шапке сообщения */
+.mm-scene-markers {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    margin-right: 8px;
+    flex: 0 0 auto;
+}
+.mm-scene-markers .mes_stmb_start,
+.mm-scene-markers .mes_stmb_end {
+    opacity: 1;
+    min-width: 26px;
+    min-height: 26px;
+}

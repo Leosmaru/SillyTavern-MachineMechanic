@@ -399,6 +399,14 @@ function createSceneButtons(messageElement) {
       messageElement.appendChild(extraButtonsContainer);
     }
   }
+  let markerBar = messageElement.querySelector(".mm-scene-markers");
+  if (!markerBar) {
+    markerBar = document.createElement("div");
+    markerBar.className = "mm-scene-markers";
+    const chName = messageElement.querySelector(".ch_name");
+    if (chName) chName.prepend(markerBar);
+    else extraButtonsContainer.appendChild(markerBar);
+  }
   if (!messageElement.querySelector(".mes_stmb_start")) {
     const startButton = document.createElement("div");
     startButton.title = translate("Mark Scene Start", "STMemoryBooks_MarkSceneStart");
@@ -409,7 +417,7 @@ function createSceneButtons(messageElement) {
       e.stopPropagation();
       setSceneMarker(messageId, "start");
     });
-    extraButtonsContainer.appendChild(startButton);
+    markerBar.appendChild(startButton);
     addedButton = true;
   }
   if (!messageElement.querySelector(".mes_stmb_end")) {
@@ -422,7 +430,7 @@ function createSceneButtons(messageElement) {
       e.stopPropagation();
       setSceneMarker(messageId, "end");
     });
-    extraButtonsContainer.appendChild(endButton);
+    markerBar.appendChild(endButton);
     addedButton = true;
   }
   return addedButton;
