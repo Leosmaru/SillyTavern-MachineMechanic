@@ -23079,9 +23079,24 @@ function mmRollDie(sides = 20) {
 }
 var mmLastRoll = null;
 var mmPendingBlock = null;
+var mmForcedRoll = null;
 function mmRollValue() {
   const n = mmRollDie(20);
   return { n, success: n >= 11 };
+}
+function mmNextRoll() {
+  if (mmForcedRoll) {
+    const f = mmForcedRoll;
+    mmForcedRoll = null;
+    if (typeof f.n === "number") {
+      const n2 = Math.max(1, Math.min(20, f.n));
+      return { n: n2, success: n2 >= 11 };
+    }
+    const success = !!f.forcedSuccess;
+    const n = success ? 11 + Math.floor(mmRandom() * 10) : 1 + Math.floor(mmRandom() * 10);
+    return { n, success };
+  }
+  return mmRollValue();
 }
 function mmRollInnerHtml(r, mode) {
   if (mode === "successfail") {
@@ -23129,7 +23144,7 @@ function mmOnGenerationStart(type, _options, dryRun) {
   }
   if (dryRun) return;
   if (type === "quiet" || type === "impersonate") return;
-  const r = mmRollValue();
+  const r = mmNextRoll();
   mmLastRoll = r;
   const mode = ms.mmDiceMode || "dice";
   const prompt = ms.mmDicePrompt || MM_DEFAULT_DICE_PROMPT;
@@ -23190,6 +23205,9 @@ async function mmOpenDiceSettings() {
   const settings = initializeSettings();
   const ms = settings.moduleSettings;
   const curPrompt = ms.mmDicePrompt ?? MM_DEFAULT_DICE_PROMPT;
+  const f = mmForcedRoll;
+  const fSel = f ? typeof f.n === "number" ? "number" : f.forcedSuccess ? "success" : "fail" : "";
+  const fNum = f && typeof f.n === "number" ? f.n : "";
   const content = `
     <div class="stmb-box" style="padding:12px; text-align:left;">
       <h3 class="stmb-section-title">\u{1F3B2} \u0411\u0440\u043E\u0441\u043E\u043A \u043A\u0443\u0431\u0438\u043A\u0430</h3>
@@ -23204,6 +23222,17 @@ async function mmOpenDiceSettings() {
       <p style="opacity:.7; font-size:.85em; margin:4px 0 0;">\u0412\u043A\u043B\u044E\u0447\u0451\u043D\u043D\u044B\u0439 \u0440\u0435\u0436\u0438\u043C \u0431\u0440\u043E\u0441\u0430\u0435\u0442 \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438 \u043F\u0435\u0440\u0435\u0434 \u043A\u0430\u0436\u0434\u044B\u043C \u043E\u0442\u0432\u0435\u0442\u043E\u043C \u0418\u0418 (\u043F\u043E\u0434 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435\u043C).</p>
       <label style="display:block; margin:12px 0 4px;">\u041F\u0440\u043E\u043C\u043F\u0442 (\u043A\u0430\u043A \u0418\u0418 \u0443\u0447\u0438\u0442\u044B\u0432\u0430\u0435\u0442 \u0431\u0440\u043E\u0441\u043E\u043A):</label>
       <textarea id="mm-dice-prompt" class="text_pole" rows="5" style="width:100%;">${escapeHtml6(curPrompt)}</textarea>
+      <label style="display:block; margin:12px 0 4px;">\u0421\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 \u0431\u0440\u043E\u0441\u043E\u043A (\u043E\u0434\u043D\u043E\u0440\u0430\u0437\u043E\u0432\u043E):</label>
+      <div class="stmb-button-row" style="justify-content:flex-start;">
+        <select id="mm-dice-force" class="text_pole" style="flex:1 1 auto;">
+          <option value="" ${fSel === "" ? "selected" : ""}>\u041E\u0431\u044B\u0447\u043D\u044B\u0439 (\u0441\u043B\u0443\u0447\u0430\u0439\u043D\u044B\u0439)</option>
+          <option value="success" ${fSel === "success" ? "selected" : ""}>\u0423\u0441\u043F\u0435\u0445</option>
+          <option value="fail" ${fSel === "fail" ? "selected" : ""}>\u041F\u0440\u043E\u0432\u0430\u043B</option>
+          <option value="number" ${fSel === "number" ? "selected" : ""}>\u0427\u0438\u0441\u043B\u043E\u2026</option>
+        </select>
+        <input type="number" id="mm-dice-force-n" class="text_pole" min="1" max="20" placeholder="1\u201320" value="${fNum}" style="width:90px;"/>
+      </div>
+      <p style="opacity:.7; font-size:.85em; margin:4px 0 0;">\u041F\u0440\u0438\u043C\u0435\u043D\u0438\u0442\u0441\u044F \u043A \u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0435\u043C\u0443 \u043E\u0442\u0432\u0435\u0442\u0443 \u0418\u0418 \u0438 \u0441\u0431\u0440\u043E\u0441\u0438\u0442\u0441\u044F.</p>
       <div class="stmb-button-row" style="margin-top:10px;">
         <div class="menu_button" id="mm-dice-roll-now">\u{1F3B2} \u0411\u0440\u043E\u0441\u0438\u0442\u044C \u0441\u0435\u0439\u0447\u0430\u0441</div>
         <div class="menu_button" id="mm-dice-reset">\u21A9 \u0421\u0431\u0440\u043E\u0441\u0438\u0442\u044C \u043F\u0440\u043E\u043C\u043F\u0442</div>
@@ -23233,6 +23262,12 @@ async function mmOpenDiceSettings() {
   ms.mmDiceEnabled = !!popup.dlg.querySelector("#mm-dice-enabled")?.checked;
   ms.mmDiceMode = popup.dlg.querySelector("#mm-dice-mode")?.value || "success-fail";
   ms.mmDicePrompt = (popup.dlg.querySelector("#mm-dice-prompt")?.value || "").trim() || MM_DEFAULT_DICE_PROMPT;
+  const forceVal = popup.dlg.querySelector("#mm-dice-force")?.value || "";
+  const forceN = parseInt(popup.dlg.querySelector("#mm-dice-force-n")?.value, 10);
+  if (forceVal === "success") mmForcedRoll = { forcedSuccess: true };
+  else if (forceVal === "fail") mmForcedRoll = { forcedSuccess: false };
+  else if (forceVal === "number" && Number.isFinite(forceN)) mmForcedRoll = { n: Math.max(1, Math.min(20, forceN)) };
+  else mmForcedRoll = null;
   saveSettingsDebounced6();
   toastr.success("\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u043A\u0443\u0431\u0438\u043A\u0430 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u044B", "\u041C\u0435\u0445\u0430\u043D\u0438\u043A \u043C\u0430\u0448\u0438\u043D");
 }
