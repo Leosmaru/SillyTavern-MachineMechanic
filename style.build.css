@@ -665,3 +665,7 @@
     min-height: 48vh;
   }
 }
+.stmb-popup .text_pole:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

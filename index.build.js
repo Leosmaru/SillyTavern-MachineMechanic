@@ -23236,7 +23236,7 @@ async function mmOpenDiceSettings() {
           <option value="fail" ${fSel === "fail" ? "selected" : ""}>\u041F\u0440\u043E\u0432\u0430\u043B</option>
           <option value="number" ${fSel === "number" ? "selected" : ""}>\u0427\u0438\u0441\u043B\u043E\u2026</option>
         </select>
-        <input type="number" id="mm-dice-force-n" class="text_pole" min="1" max="20" placeholder="1\u201320" value="${fNum}" style="width:90px;"/>
+        <input type="number" id="mm-dice-force-n" class="text_pole" min="1" max="20" placeholder="1\u201320" value="${fNum}" ${fSel === "number" ? "" : "disabled"} style="width:90px;"/>
       </div>
       <p style="opacity:.7; font-size:.85em; margin:4px 0 0;">\u041F\u0440\u0438\u043C\u0435\u043D\u0438\u0442\u0441\u044F \u043A \u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0435\u043C\u0443 \u043E\u0442\u0432\u0435\u0442\u0443 \u0418\u0418 \u0438 \u0441\u0431\u0440\u043E\u0441\u0438\u0442\u0441\u044F.</p>
       <div class="stmb-button-row" style="margin-top:10px;">
@@ -23259,6 +23259,13 @@ async function mmOpenDiceSettings() {
     curMode = modeSel.value;
     ta.value = prompts[curMode];
   });
+  const forceSel = popup.dlg.querySelector("#mm-dice-force");
+  const forceNum = popup.dlg.querySelector("#mm-dice-force-n");
+  const syncForceNum = () => {
+    forceNum.disabled = forceSel.value !== "number";
+  };
+  forceSel.addEventListener("change", syncForceNum);
+  syncForceNum();
   popup.dlg.addEventListener("click", (e) => {
     if (e.target && e.target.id === "mm-dice-reset") {
       ta.value = curMode === "successfail" ? MM_DEFAULT_DICE_PROMPT_SF : MM_DEFAULT_DICE_PROMPT_NUM;

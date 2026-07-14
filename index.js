@@ -6618,7 +6618,7 @@ export async function mmOpenDiceSettings() {
           <option value="fail" ${fSel === "fail" ? "selected" : ""}>Провал</option>
           <option value="number" ${fSel === "number" ? "selected" : ""}>Число…</option>
         </select>
-        <input type="number" id="mm-dice-force-n" class="text_pole" min="1" max="20" placeholder="1–20" value="${fNum}" style="width:90px;"/>
+        <input type="number" id="mm-dice-force-n" class="text_pole" min="1" max="20" placeholder="1–20" value="${fNum}" ${fSel === "number" ? "" : "disabled"} style="width:90px;"/>
       </div>
       <p style="opacity:.7; font-size:.85em; margin:4px 0 0;">Применится к следующему ответу ИИ и сбросится.</p>
       <div class="stmb-button-row" style="margin-top:10px;">
@@ -6642,6 +6642,12 @@ export async function mmOpenDiceSettings() {
     curMode = modeSel.value;
     ta.value = prompts[curMode];
   });
+  // Поле числа доступно только при выборе «Число…».
+  const forceSel = popup.dlg.querySelector("#mm-dice-force");
+  const forceNum = popup.dlg.querySelector("#mm-dice-force-n");
+  const syncForceNum = () => { forceNum.disabled = forceSel.value !== "number"; };
+  forceSel.addEventListener("change", syncForceNum);
+  syncForceNum();
   popup.dlg.addEventListener("click", (e) => {
     if (e.target && e.target.id === "mm-dice-reset") {
       ta.value = curMode === "successfail" ? MM_DEFAULT_DICE_PROMPT_SF : MM_DEFAULT_DICE_PROMPT_NUM;
