@@ -352,8 +352,12 @@ const MM_DEFAULT_TRANSLATE_PROMPT =
   "Переведи текст ниже на русский язык. Сохрани смысл, стиль, форматирование и имена собственные. Не добавляй пояснений, заметок или комментариев — верни ТОЛЬКО перевод.";
 
 // Механик машин: промпт поведения ИИ на бросок кубика (редактируется в настройках).
-const MM_DEFAULT_DICE_PROMPT =
-  "You MUST strictly obey the dice outcome for the last attempted action. It is a hard rule, not a suggestion. If a d20 number is given, scale the result to it: the lower the number the worse and more critical the failure, the higher the better and more critical the success (1 = catastrophe, 20 = triumph). FAILURE means the action clearly does NOT work — never write it as a success. Do not mention the roll, dice, or numbers in the reply.";
+// Промпт режима «Успех / Провал» (бинарный).
+const MM_DEFAULT_DICE_PROMPT_SF =
+  "You MUST strictly obey the dice outcome for the last attempted action. It is a hard rule, not a suggestion. FAILURE means the action clearly does NOT work — never write it as a success or partial success; show it going wrong with a real, immediate consequence. SUCCESS means it works well. Do not mention the roll or dice in the reply.";
+// Промпт режима «Кубик (число)» — с описанием критичности чисел.
+const MM_DEFAULT_DICE_PROMPT_NUM =
+  "You MUST strictly obey the d20 dice result for the last attempted action. Scale the outcome to the number: 1 = catastrophic failure, 2-5 = severe failure, 6-10 = failure, 11-15 = success, 16-19 = strong success, 20 = critical triumph. The lower the number the worse and more critical; the higher the better and more impressive. Never soften a low roll into a success. Do not mention the roll, dice, or numbers in the reply.";
 
 const defaultSettings = {
   moduleSettings: {
@@ -389,7 +393,8 @@ const defaultSettings = {
     mmTranslateTemp: 0.3,
     // Механик машин: бросок кубика
     mmDiceEnabled: false,
-    mmDicePrompt: MM_DEFAULT_DICE_PROMPT,
+    mmDicePromptSF: MM_DEFAULT_DICE_PROMPT_SF,
+    mmDicePromptNum: MM_DEFAULT_DICE_PROMPT_NUM,
     mmDiceMode: "dice", // "dice" = число d20; "successfail" = только Успех/Провал
     useRegex: false,
     selectedRegexOutgoing: [],
@@ -6515,7 +6520,9 @@ export function mmOnGenerationStart(type, _options, dryRun) {
   const r = mmNextRoll();
   mmLastRoll = r;
   const mode = ms.mmDiceMode || "dice";
-  const prompt = ms.mmDicePrompt || MM_DEFAULT_DICE_PROMPT;
+  const prompt = mode === "successfail"
+    ? (ms.mmDicePromptSF || MM_DEFAULT_DICE_PROMPT_SF)
+    : (ms.mmDicePromptNum || MM_DEFAULT_DICE_PROMPT_NUM);
   let outcome;
   if (mode === "successfail") {
     outcome = r.success
@@ -6581,7 +6588,11 @@ export function mmShowRollOnMessage(mesId) {
 export async function mmOpenDiceSettings() {
   const settings = initializeSettings();
   const ms = settings.moduleSettings;
-  const curPrompt = ms.mmDicePrompt ?? MM_DEFAULT_DICE_PROMPT;
+  const prompts = {
+    successfail: ms.mmDicePromptSF ?? MM_DEFAULT_DICE_PROMPT_SF,
+    dice: ms.mmDicePromptNum ?? MM_DEFAULT_DICE_PROMPT_NUM,
+  };
+  let curMode = ms.mmDiceMode || "dice";
   const f = mmForcedRoll;
   const fSel = f ? (typeof f.n === "number" ? "number" : (f.forcedSuccess ? "success" : "fail")) : "";
   const fNum = f && typeof f.n === "number" ? f.n : "";
@@ -6597,8 +6608,8 @@ export async function mmOpenDiceSettings() {
         <option value="successfail" ${ms.mmDiceMode === "successfail" ? "selected" : ""}>✅ Успех / Провал</option>
       </select>
       <p style="opacity:.7; font-size:.85em; margin:4px 0 0;">Включённый режим бросает автоматически перед каждым ответом ИИ (под сообщением).</p>
-      <label style="display:block; margin:12px 0 4px;">Промпт (как ИИ учитывает бросок):</label>
-      <textarea id="mm-dice-prompt" class="text_pole" rows="5" style="width:100%;">${escapeHtml(curPrompt)}</textarea>
+      <label style="display:block; margin:12px 0 4px;">Промпт выбранного режима (у каждого свой):</label>
+      <textarea id="mm-dice-prompt" class="text_pole" rows="5" style="width:100%;">${escapeHtml(prompts[curMode])}</textarea>
       <label style="display:block; margin:12px 0 4px;">Следующий бросок (одноразово):</label>
       <div class="stmb-button-row" style="justify-content:flex-start;">
         <select id="mm-dice-force" class="text_pole" style="flex:1 1 auto;">
@@ -6623,23 +6634,31 @@ export async function mmOpenDiceSettings() {
     allowVerticalScrolling: true,
   });
   markStmbPopup(popup);
+  const ta = popup.dlg.querySelector("#mm-dice-prompt");
+  const modeSel = popup.dlg.querySelector("#mm-dice-mode");
+  // Смена режима — сохранить текущий текст и показать промпт нового режима.
+  modeSel.addEventListener("change", () => {
+    prompts[curMode] = ta.value;
+    curMode = modeSel.value;
+    ta.value = prompts[curMode];
+  });
   popup.dlg.addEventListener("click", (e) => {
     if (e.target && e.target.id === "mm-dice-reset") {
-      const ta = popup.dlg.querySelector("#mm-dice-prompt");
-      if (ta) ta.value = MM_DEFAULT_DICE_PROMPT;
+      ta.value = curMode === "successfail" ? MM_DEFAULT_DICE_PROMPT_SF : MM_DEFAULT_DICE_PROMPT_NUM;
     }
     if (e.target && e.target.id === "mm-dice-roll-now") {
-      const m = popup.dlg.querySelector("#mm-dice-mode")?.value;
-      if (m) ms.mmDiceMode = m; // предпросмотр в выбранном режиме
+      ms.mmDiceMode = curMode; // предпросмотр в выбранном режиме
       mmRollLastMessage();
     }
   });
   const res = await popup.show();
   if (res !== POPUP_RESULT.AFFIRMATIVE) return;
   ms.mmDiceEnabled = !!popup.dlg.querySelector("#mm-dice-enabled")?.checked;
-  ms.mmDiceMode = popup.dlg.querySelector("#mm-dice-mode")?.value || "success-fail";
-  ms.mmDicePrompt =
-    (popup.dlg.querySelector("#mm-dice-prompt")?.value || "").trim() || MM_DEFAULT_DICE_PROMPT;
+  curMode = modeSel.value || curMode;
+  ms.mmDiceMode = curMode;
+  prompts[curMode] = ta.value; // сохранить текущий текст в его режим
+  ms.mmDicePromptSF = (prompts.successfail || "").trim() || MM_DEFAULT_DICE_PROMPT_SF;
+  ms.mmDicePromptNum = (prompts.dice || "").trim() || MM_DEFAULT_DICE_PROMPT_NUM;
 
   // Разовый форс следующего броска
   const forceVal = popup.dlg.querySelector("#mm-dice-force")?.value || "";

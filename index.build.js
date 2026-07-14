@@ -18214,7 +18214,8 @@ var autoSummaryJobRetryInFlight = false;
 var DEFAULT_MAX_TOKENS = 4e3;
 var DEFAULT_TITLE_FORMAT = "[000] - {{title}}";
 var MM_DEFAULT_TRANSLATE_PROMPT = "\u041F\u0435\u0440\u0435\u0432\u0435\u0434\u0438 \u0442\u0435\u043A\u0441\u0442 \u043D\u0438\u0436\u0435 \u043D\u0430 \u0440\u0443\u0441\u0441\u043A\u0438\u0439 \u044F\u0437\u044B\u043A. \u0421\u043E\u0445\u0440\u0430\u043D\u0438 \u0441\u043C\u044B\u0441\u043B, \u0441\u0442\u0438\u043B\u044C, \u0444\u043E\u0440\u043C\u0430\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u0438 \u0438\u043C\u0435\u043D\u0430 \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u044B\u0435. \u041D\u0435 \u0434\u043E\u0431\u0430\u0432\u043B\u044F\u0439 \u043F\u043E\u044F\u0441\u043D\u0435\u043D\u0438\u0439, \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u0438\u043B\u0438 \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0435\u0432 \u2014 \u0432\u0435\u0440\u043D\u0438 \u0422\u041E\u041B\u042C\u041A\u041E \u043F\u0435\u0440\u0435\u0432\u043E\u0434.";
-var MM_DEFAULT_DICE_PROMPT = "You MUST strictly obey the dice outcome for the last attempted action. It is a hard rule, not a suggestion. If a d20 number is given, scale the result to it: the lower the number the worse and more critical the failure, the higher the better and more critical the success (1 = catastrophe, 20 = triumph). FAILURE means the action clearly does NOT work \u2014 never write it as a success. Do not mention the roll, dice, or numbers in the reply.";
+var MM_DEFAULT_DICE_PROMPT_SF = "You MUST strictly obey the dice outcome for the last attempted action. It is a hard rule, not a suggestion. FAILURE means the action clearly does NOT work \u2014 never write it as a success or partial success; show it going wrong with a real, immediate consequence. SUCCESS means it works well. Do not mention the roll or dice in the reply.";
+var MM_DEFAULT_DICE_PROMPT_NUM = "You MUST strictly obey the d20 dice result for the last attempted action. Scale the outcome to the number: 1 = catastrophic failure, 2-5 = severe failure, 6-10 = failure, 11-15 = success, 16-19 = strong success, 20 = critical triumph. The lower the number the worse and more critical; the higher the better and more impressive. Never soften a low roll into a success. Do not mention the roll, dice, or numbers in the reply.";
 var defaultSettings = {
   moduleSettings: {
     alwaysUseDefault: true,
@@ -18252,7 +18253,8 @@ var defaultSettings = {
     mmTranslateTemp: 0.3,
     // Механик машин: бросок кубика
     mmDiceEnabled: false,
-    mmDicePrompt: MM_DEFAULT_DICE_PROMPT,
+    mmDicePromptSF: MM_DEFAULT_DICE_PROMPT_SF,
+    mmDicePromptNum: MM_DEFAULT_DICE_PROMPT_NUM,
     mmDiceMode: "dice",
     // "dice" = число d20; "successfail" = только Успех/Провал
     useRegex: false,
@@ -23147,7 +23149,7 @@ function mmOnGenerationStart(type, _options, dryRun) {
   const r = mmNextRoll();
   mmLastRoll = r;
   const mode = ms.mmDiceMode || "dice";
-  const prompt = ms.mmDicePrompt || MM_DEFAULT_DICE_PROMPT;
+  const prompt = mode === "successfail" ? ms.mmDicePromptSF || MM_DEFAULT_DICE_PROMPT_SF : ms.mmDicePromptNum || MM_DEFAULT_DICE_PROMPT_NUM;
   let outcome;
   if (mode === "successfail") {
     outcome = r.success ? "ACTION ROLL: SUCCESS. The last attempted action clearly SUCCEEDS." : "ACTION ROLL: FAILURE. The last attempted action clearly FAILS \u2014 do NOT let it succeed or partially succeed; show it going wrong with a real negative consequence.";
@@ -23204,7 +23206,11 @@ function mmShowRollOnMessage(mesId) {
 async function mmOpenDiceSettings() {
   const settings = initializeSettings();
   const ms = settings.moduleSettings;
-  const curPrompt = ms.mmDicePrompt ?? MM_DEFAULT_DICE_PROMPT;
+  const prompts = {
+    successfail: ms.mmDicePromptSF ?? MM_DEFAULT_DICE_PROMPT_SF,
+    dice: ms.mmDicePromptNum ?? MM_DEFAULT_DICE_PROMPT_NUM
+  };
+  let curMode = ms.mmDiceMode || "dice";
   const f = mmForcedRoll;
   const fSel = f ? typeof f.n === "number" ? "number" : f.forcedSuccess ? "success" : "fail" : "";
   const fNum = f && typeof f.n === "number" ? f.n : "";
@@ -23220,8 +23226,8 @@ async function mmOpenDiceSettings() {
         <option value="successfail" ${ms.mmDiceMode === "successfail" ? "selected" : ""}>\u2705 \u0423\u0441\u043F\u0435\u0445 / \u041F\u0440\u043E\u0432\u0430\u043B</option>
       </select>
       <p style="opacity:.7; font-size:.85em; margin:4px 0 0;">\u0412\u043A\u043B\u044E\u0447\u0451\u043D\u043D\u044B\u0439 \u0440\u0435\u0436\u0438\u043C \u0431\u0440\u043E\u0441\u0430\u0435\u0442 \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438 \u043F\u0435\u0440\u0435\u0434 \u043A\u0430\u0436\u0434\u044B\u043C \u043E\u0442\u0432\u0435\u0442\u043E\u043C \u0418\u0418 (\u043F\u043E\u0434 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435\u043C).</p>
-      <label style="display:block; margin:12px 0 4px;">\u041F\u0440\u043E\u043C\u043F\u0442 (\u043A\u0430\u043A \u0418\u0418 \u0443\u0447\u0438\u0442\u044B\u0432\u0430\u0435\u0442 \u0431\u0440\u043E\u0441\u043E\u043A):</label>
-      <textarea id="mm-dice-prompt" class="text_pole" rows="5" style="width:100%;">${escapeHtml6(curPrompt)}</textarea>
+      <label style="display:block; margin:12px 0 4px;">\u041F\u0440\u043E\u043C\u043F\u0442 \u0432\u044B\u0431\u0440\u0430\u043D\u043D\u043E\u0433\u043E \u0440\u0435\u0436\u0438\u043C\u0430 (\u0443 \u043A\u0430\u0436\u0434\u043E\u0433\u043E \u0441\u0432\u043E\u0439):</label>
+      <textarea id="mm-dice-prompt" class="text_pole" rows="5" style="width:100%;">${escapeHtml6(prompts[curMode])}</textarea>
       <label style="display:block; margin:12px 0 4px;">\u0421\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 \u0431\u0440\u043E\u0441\u043E\u043A (\u043E\u0434\u043D\u043E\u0440\u0430\u0437\u043E\u0432\u043E):</label>
       <div class="stmb-button-row" style="justify-content:flex-start;">
         <select id="mm-dice-force" class="text_pole" style="flex:1 1 auto;">
@@ -23246,22 +23252,30 @@ async function mmOpenDiceSettings() {
     allowVerticalScrolling: true
   });
   markStmbPopup(popup);
+  const ta = popup.dlg.querySelector("#mm-dice-prompt");
+  const modeSel = popup.dlg.querySelector("#mm-dice-mode");
+  modeSel.addEventListener("change", () => {
+    prompts[curMode] = ta.value;
+    curMode = modeSel.value;
+    ta.value = prompts[curMode];
+  });
   popup.dlg.addEventListener("click", (e) => {
     if (e.target && e.target.id === "mm-dice-reset") {
-      const ta = popup.dlg.querySelector("#mm-dice-prompt");
-      if (ta) ta.value = MM_DEFAULT_DICE_PROMPT;
+      ta.value = curMode === "successfail" ? MM_DEFAULT_DICE_PROMPT_SF : MM_DEFAULT_DICE_PROMPT_NUM;
     }
     if (e.target && e.target.id === "mm-dice-roll-now") {
-      const m = popup.dlg.querySelector("#mm-dice-mode")?.value;
-      if (m) ms.mmDiceMode = m;
+      ms.mmDiceMode = curMode;
       mmRollLastMessage();
     }
   });
   const res = await popup.show();
   if (res !== POPUP_RESULT9.AFFIRMATIVE) return;
   ms.mmDiceEnabled = !!popup.dlg.querySelector("#mm-dice-enabled")?.checked;
-  ms.mmDiceMode = popup.dlg.querySelector("#mm-dice-mode")?.value || "success-fail";
-  ms.mmDicePrompt = (popup.dlg.querySelector("#mm-dice-prompt")?.value || "").trim() || MM_DEFAULT_DICE_PROMPT;
+  curMode = modeSel.value || curMode;
+  ms.mmDiceMode = curMode;
+  prompts[curMode] = ta.value;
+  ms.mmDicePromptSF = (prompts.successfail || "").trim() || MM_DEFAULT_DICE_PROMPT_SF;
+  ms.mmDicePromptNum = (prompts.dice || "").trim() || MM_DEFAULT_DICE_PROMPT_NUM;
   const forceVal = popup.dlg.querySelector("#mm-dice-force")?.value || "";
   const forceN = parseInt(popup.dlg.querySelector("#mm-dice-force-n")?.value, 10);
   if (forceVal === "success") mmForcedRoll = { forcedSuccess: true };
