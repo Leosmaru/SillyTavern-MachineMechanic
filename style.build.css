@@ -604,3 +604,28 @@
   border-left-color: #e57373;
   color: #e57373;
 }
+.mm-dice {
+  margin-top: 6px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px dashed var(--SmartThemeBorderColor);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.95em;
+}
+.mm-dice-num {
+  font-weight: bold;
+}
+.mm-dice-ok {
+  color: #6bbf59;
+}
+.mm-dice-fail {
+  color: #e57373;
+}
+.mm-dice .mm-dice-reroll {
+  width: auto;
+  flex: 0 0 auto;
+  cursor: pointer;
+  padding: 2px 10px;
+}

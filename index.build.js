@@ -18214,6 +18214,7 @@ var autoSummaryJobRetryInFlight = false;
 var DEFAULT_MAX_TOKENS = 4e3;
 var DEFAULT_TITLE_FORMAT = "[000] - {{title}}";
 var MM_DEFAULT_TRANSLATE_PROMPT = "\u041F\u0435\u0440\u0435\u0432\u0435\u0434\u0438 \u0442\u0435\u043A\u0441\u0442 \u043D\u0438\u0436\u0435 \u043D\u0430 \u0440\u0443\u0441\u0441\u043A\u0438\u0439 \u044F\u0437\u044B\u043A. \u0421\u043E\u0445\u0440\u0430\u043D\u0438 \u0441\u043C\u044B\u0441\u043B, \u0441\u0442\u0438\u043B\u044C, \u0444\u043E\u0440\u043C\u0430\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u0438 \u0438\u043C\u0435\u043D\u0430 \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u044B\u0435. \u041D\u0435 \u0434\u043E\u0431\u0430\u0432\u043B\u044F\u0439 \u043F\u043E\u044F\u0441\u043D\u0435\u043D\u0438\u0439, \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u0438\u043B\u0438 \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0435\u0432 \u2014 \u0432\u0435\u0440\u043D\u0438 \u0422\u041E\u041B\u042C\u041A\u041E \u043F\u0435\u0440\u0435\u0432\u043E\u0434.";
+var MM_DEFAULT_DICE_PROMPT = "\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u0435 \u043F\u0440\u043E\u0432\u0435\u0440\u044F\u0435\u0442\u0441\u044F \u0431\u0440\u043E\u0441\u043A\u043E\u043C d20: 11 \u0438 \u0432\u044B\u0448\u0435 \u2014 \u0443\u0441\u043F\u0435\u0445, \u043C\u0435\u043D\u044C\u0448\u0435 \u2014 \u043F\u0440\u043E\u0432\u0430\u043B. \u041F\u0440\u0438 \u0443\u0441\u043F\u0435\u0445\u0435 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0435 \u0443\u0434\u0430\u0451\u0442\u0441\u044F; \u043F\u0440\u0438 \u043F\u0440\u043E\u0432\u0430\u043B\u0435 \u2014 \u043E\u0441\u043B\u043E\u0436\u043D\u0435\u043D\u0438\u0435 \u0438\u043B\u0438 \u043D\u0435\u0443\u0434\u0430\u0447\u0430. \u0412\u043F\u043B\u0435\u0442\u0438 \u0438\u0441\u0445\u043E\u0434 \u0432 \u043E\u043F\u0438\u0441\u0430\u043D\u0438\u0435 \u0435\u0441\u0442\u0435\u0441\u0442\u0432\u0435\u043D\u043D\u043E, \u043D\u0435 \u043D\u0430\u0437\u044B\u0432\u0430\u044F \u0447\u0438\u0441\u043B\u043E.";
 var defaultSettings = {
   moduleSettings: {
     alwaysUseDefault: true,
@@ -18244,6 +18245,10 @@ var defaultSettings = {
     mmTranslatePrompt: MM_DEFAULT_TRANSLATE_PROMPT,
     mmTranslateProfileIndex: null,
     // null = тот же профиль, что основной
+    // Механик машин: бросок кубика
+    mmDiceEnabled: false,
+    mmDicePrompt: MM_DEFAULT_DICE_PROMPT,
+    mmDiceMode: "success-fail",
     useRegex: false,
     selectedRegexOutgoing: [],
     selectedRegexIncoming: [],
@@ -22887,6 +22892,8 @@ function renderInlineActionButtons(container) {
     b.addEventListener("click", action);
     return b;
   };
+  bar.appendChild(mk("\u{1F3B2} \u0411\u0440\u043E\u0441\u043E\u043A", () => mmDoRoll()));
+  bar.appendChild(mk("\u{1F3B2} \u041F\u0440\u043E\u043C\u043F\u0442 \u0431\u0440\u043E\u0441\u043A\u0430", () => mmOpenDiceSettings()));
   bar.appendChild(
     mk("\u{1F9E0} " + translate20("Create Memory", "STMemoryBooks_CreateMemoryButton"), async () => {
       const markers = getSceneMarkers() || {};
@@ -23003,6 +23010,83 @@ async function mmOpenTranslateSettings() {
   ms.mmTranslateProfileIndex = profVal === "" ? null : parseInt(profVal, 10);
   saveSettingsDebounced6();
   toastr.success("\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u043F\u0435\u0440\u0435\u0432\u043E\u0434\u0430 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u044B", "\u041C\u0435\u0445\u0430\u043D\u0438\u043A \u043C\u0430\u0448\u0438\u043D");
+}
+var mmRngState = Date.now() >>> 0 ^ 2654435769;
+function mmRandom() {
+  mmRngState = mmRngState + 1831565813 | 0;
+  let t2 = Math.imul(mmRngState ^ mmRngState >>> 15, 1 | mmRngState);
+  t2 = t2 + Math.imul(t2 ^ t2 >>> 7, 61 | t2) ^ t2;
+  return ((t2 ^ t2 >>> 14) >>> 0) / 4294967296;
+}
+function mmRollDie(sides = 20) {
+  return 1 + Math.floor(mmRandom() * sides);
+}
+function mmRenderRoll(mes) {
+  const textEl = mes.querySelector(".mes_text");
+  if (!textEl) return;
+  let block = mes.querySelector(".mm-dice");
+  if (!block) {
+    block = document.createElement("div");
+    block.className = "mm-dice";
+    textEl.after(block);
+  }
+  const n = mmRollDie(20);
+  const success = n >= 11;
+  block.innerHTML = `<span class="mm-dice-num">\u{1F3B2} ${n}</span> \u2014 <b class="mm-dice-${success ? "ok" : "fail"}">${success ? "\u0423\u0441\u043F\u0435\u0445" : "\u041F\u0440\u043E\u0432\u0430\u043B"}</b> <span class="menu_button mm-dice-reroll" title="\u0411\u0440\u043E\u0441\u0438\u0442\u044C \u0437\u0430\u043D\u043E\u0432\u043E">\u0411\u0440\u043E\u0441\u0438\u0442\u044C</span>`;
+  block.querySelector(".mm-dice-reroll").addEventListener("click", () => mmRenderRoll(mes));
+}
+function mmDoRoll() {
+  const settings = initializeSettings();
+  if (!settings.moduleSettings.mmDiceEnabled) {
+    toastr.info("\u0420\u0435\u0436\u0438\u043C \u043A\u0443\u0431\u0438\u043A\u0430 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D \u2014 \u0432\u043A\u043B\u044E\u0447\u0438 \u0432 \xAB\u{1F3B2} \u041F\u0440\u043E\u043C\u043F\u0442 \u0431\u0440\u043E\u0441\u043A\u0430\xBB.", "\u041C\u0435\u0445\u0430\u043D\u0438\u043A \u043C\u0430\u0448\u0438\u043D");
+    return;
+  }
+  const chat6 = document.getElementById("chat");
+  const last = chat6 ? chat6.querySelector(".mes:last-of-type") : null;
+  if (!last) {
+    toastr.warning("\u041D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0439 \u0432 \u0447\u0430\u0442\u0435.", "\u041C\u0435\u0445\u0430\u043D\u0438\u043A \u043C\u0430\u0448\u0438\u043D");
+    return;
+  }
+  mmRenderRoll(last);
+}
+async function mmOpenDiceSettings() {
+  const settings = initializeSettings();
+  const ms = settings.moduleSettings;
+  const curPrompt = ms.mmDicePrompt ?? MM_DEFAULT_DICE_PROMPT;
+  const content = `
+    <div class="stmb-box" style="padding:12px; text-align:left;">
+      <h3 class="stmb-section-title">\u{1F3B2} \u0411\u0440\u043E\u0441\u043E\u043A \u043A\u0443\u0431\u0438\u043A\u0430</h3>
+      <label style="display:flex; gap:8px; align-items:center; margin:8px 0;">
+        <input type="checkbox" id="mm-dice-enabled" ${ms.mmDiceEnabled ? "checked" : ""}/> \u0412\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u0440\u0435\u0436\u0438\u043C \u043A\u0443\u0431\u0438\u043A\u0430
+      </label>
+      <label style="display:block; margin:8px 0 4px;">\u0420\u0435\u0436\u0438\u043C:</label>
+      <select id="mm-dice-mode" class="text_pole" style="width:100%;">
+        <option value="success-fail" selected>\u0423\u0441\u043F\u0435\u0445 / \u041F\u0440\u043E\u0432\u0430\u043B (d20, 11+)</option>
+      </select>
+      <label style="display:block; margin:12px 0 4px;">\u041F\u0440\u043E\u043C\u043F\u0442 (\u043A\u0430\u043A \u0418\u0418 \u0443\u0447\u0438\u0442\u044B\u0432\u0430\u0435\u0442 \u0431\u0440\u043E\u0441\u043E\u043A):</label>
+      <textarea id="mm-dice-prompt" class="text_pole" rows="5" style="width:100%;">${escapeHtml6(curPrompt)}</textarea>
+      <div class="stmb-button-row" style="margin-top:10px;">
+        <div class="menu_button" id="mm-dice-reset">\u21A9 \u0421\u0431\u0440\u043E\u0441\u0438\u0442\u044C \u043F\u0440\u043E\u043C\u043F\u0442</div>
+      </div>
+    </div>`;
+  const popup = new Popup9(content, POPUP_TYPE9.TEXT, "", {
+    okButton: "\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C",
+    cancelButton: "\u041E\u0442\u043C\u0435\u043D\u0430",
+    wide: true
+  });
+  popup.dlg.addEventListener("click", (e) => {
+    if (e.target && e.target.id === "mm-dice-reset") {
+      const ta = popup.dlg.querySelector("#mm-dice-prompt");
+      if (ta) ta.value = MM_DEFAULT_DICE_PROMPT;
+    }
+  });
+  const res = await popup.show();
+  if (res !== POPUP_RESULT9.AFFIRMATIVE) return;
+  ms.mmDiceEnabled = !!popup.dlg.querySelector("#mm-dice-enabled")?.checked;
+  ms.mmDiceMode = popup.dlg.querySelector("#mm-dice-mode")?.value || "success-fail";
+  ms.mmDicePrompt = (popup.dlg.querySelector("#mm-dice-prompt")?.value || "").trim() || MM_DEFAULT_DICE_PROMPT;
+  saveSettingsDebounced6();
+  toastr.success("\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u043A\u0443\u0431\u0438\u043A\u0430 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u044B", "\u041C\u0435\u0445\u0430\u043D\u0438\u043A \u043C\u0430\u0448\u0438\u043D");
 }
 async function showSettingsPopup() {
   const settings = initializeSettings();
@@ -25064,6 +25148,8 @@ $(document).ready(() => {
 export {
   currentProfile,
   isMemoryProcessing,
+  mmDoRoll,
+  mmOpenDiceSettings,
   mmOpenInline,
   mmOpenTranslateSettings,
   mmTranslateText,

@@ -351,6 +351,10 @@ const DEFAULT_TITLE_FORMAT = "[000] - {{title}}";
 const MM_DEFAULT_TRANSLATE_PROMPT =
   "Переведи текст ниже на русский язык. Сохрани смысл, стиль, форматирование и имена собственные. Не добавляй пояснений, заметок или комментариев — верни ТОЛЬКО перевод.";
 
+// Механик машин: промпт поведения ИИ на бросок кубика (редактируется в настройках).
+const MM_DEFAULT_DICE_PROMPT =
+  "Действие проверяется броском d20: 11 и выше — успех, меньше — провал. При успехе действие удаётся; при провале — осложнение или неудача. Вплети исход в описание естественно, не называя число.";
+
 const defaultSettings = {
   moduleSettings: {
     alwaysUseDefault: true,
@@ -380,6 +384,10 @@ const defaultSettings = {
     // Механик машин: перевод сообщений
     mmTranslatePrompt: MM_DEFAULT_TRANSLATE_PROMPT,
     mmTranslateProfileIndex: null, // null = тот же профиль, что основной
+    // Механик машин: бросок кубика
+    mmDiceEnabled: false,
+    mmDicePrompt: MM_DEFAULT_DICE_PROMPT,
+    mmDiceMode: "success-fail",
     useRegex: false,
     selectedRegexOutgoing: [],
     selectedRegexIncoming: [],
@@ -6208,6 +6216,10 @@ function renderInlineActionButtons(container) {
     return b;
   };
 
+  // Механик машин: кнопки кубика — первыми.
+  bar.appendChild(mk("🎲 Бросок", () => mmDoRoll()));
+  bar.appendChild(mk("🎲 Промпт броска", () => mmOpenDiceSettings()));
+
   bar.appendChild(
     mk("🧠 " + translate("Create Memory", "STMemoryBooks_CreateMemoryButton"), async () => {
       const markers = getSceneMarkers() || {};
@@ -6348,6 +6360,96 @@ export async function mmOpenTranslateSettings() {
   ms.mmTranslateProfileIndex = profVal === "" ? null : parseInt(profVal, 10);
   saveSettingsDebounced();
   toastr.success("Настройки перевода сохранены", "Механик машин");
+}
+
+// ── Механик машин: бросок кубика ───────────────────────────────────────────
+// Собственный ГПСЧ (mulberry32), НЕ инструменты рандома SillyTavern.
+let mmRngState = (Date.now() >>> 0) ^ 0x9e3779b9;
+function mmRandom() {
+  mmRngState = (mmRngState + 0x6d2b79f5) | 0;
+  let t = Math.imul(mmRngState ^ (mmRngState >>> 15), 1 | mmRngState);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+function mmRollDie(sides = 20) {
+  return 1 + Math.floor(mmRandom() * sides);
+}
+
+// Рисует блок броска под сообщением (плагин сам рисует число, не ИИ).
+function mmRenderRoll(mes) {
+  const textEl = mes.querySelector(".mes_text");
+  if (!textEl) return;
+  let block = mes.querySelector(".mm-dice");
+  if (!block) {
+    block = document.createElement("div");
+    block.className = "mm-dice";
+    textEl.after(block);
+  }
+  const n = mmRollDie(20);
+  const success = n >= 11;
+  block.innerHTML =
+    `<span class="mm-dice-num">🎲 ${n}</span> — ` +
+    `<b class="mm-dice-${success ? "ok" : "fail"}">${success ? "Успех" : "Провал"}</b> ` +
+    `<span class="menu_button mm-dice-reroll" title="Бросить заново">Бросить</span>`;
+  block.querySelector(".mm-dice-reroll").addEventListener("click", () => mmRenderRoll(mes));
+}
+
+// Бросок под последним сообщением чата.
+export function mmDoRoll() {
+  const settings = initializeSettings();
+  if (!settings.moduleSettings.mmDiceEnabled) {
+    toastr.info("Режим кубика выключен — включи в «🎲 Промпт броска».", "Механик машин");
+    return;
+  }
+  const chat = document.getElementById("chat");
+  const last = chat ? chat.querySelector(".mes:last-of-type") : null;
+  if (!last) {
+    toastr.warning("Нет сообщений в чате.", "Механик машин");
+    return;
+  }
+  mmRenderRoll(last);
+}
+
+// Окно: вкл/выкл режим, промпт поведения на бросок, режим успех/провал.
+export async function mmOpenDiceSettings() {
+  const settings = initializeSettings();
+  const ms = settings.moduleSettings;
+  const curPrompt = ms.mmDicePrompt ?? MM_DEFAULT_DICE_PROMPT;
+  const content = `
+    <div class="stmb-box" style="padding:12px; text-align:left;">
+      <h3 class="stmb-section-title">🎲 Бросок кубика</h3>
+      <label style="display:flex; gap:8px; align-items:center; margin:8px 0;">
+        <input type="checkbox" id="mm-dice-enabled" ${ms.mmDiceEnabled ? "checked" : ""}/> Включить режим кубика
+      </label>
+      <label style="display:block; margin:8px 0 4px;">Режим:</label>
+      <select id="mm-dice-mode" class="text_pole" style="width:100%;">
+        <option value="success-fail" selected>Успех / Провал (d20, 11+)</option>
+      </select>
+      <label style="display:block; margin:12px 0 4px;">Промпт (как ИИ учитывает бросок):</label>
+      <textarea id="mm-dice-prompt" class="text_pole" rows="5" style="width:100%;">${escapeHtml(curPrompt)}</textarea>
+      <div class="stmb-button-row" style="margin-top:10px;">
+        <div class="menu_button" id="mm-dice-reset">↩ Сбросить промпт</div>
+      </div>
+    </div>`;
+  const popup = new Popup(content, POPUP_TYPE.TEXT, "", {
+    okButton: "Сохранить",
+    cancelButton: "Отмена",
+    wide: true,
+  });
+  popup.dlg.addEventListener("click", (e) => {
+    if (e.target && e.target.id === "mm-dice-reset") {
+      const ta = popup.dlg.querySelector("#mm-dice-prompt");
+      if (ta) ta.value = MM_DEFAULT_DICE_PROMPT;
+    }
+  });
+  const res = await popup.show();
+  if (res !== POPUP_RESULT.AFFIRMATIVE) return;
+  ms.mmDiceEnabled = !!popup.dlg.querySelector("#mm-dice-enabled")?.checked;
+  ms.mmDiceMode = popup.dlg.querySelector("#mm-dice-mode")?.value || "success-fail";
+  ms.mmDicePrompt =
+    (popup.dlg.querySelector("#mm-dice-prompt")?.value || "").trim() || MM_DEFAULT_DICE_PROMPT;
+  saveSettingsDebounced();
+  toastr.success("Настройки кубика сохранены", "Механик машин");
 }
 
 /**
