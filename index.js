@@ -387,7 +387,7 @@ const defaultSettings = {
     // Механик машин: бросок кубика
     mmDiceEnabled: false,
     mmDicePrompt: MM_DEFAULT_DICE_PROMPT,
-    mmDiceMode: "success-fail",
+    mmDiceMode: "dice", // "dice" = число d20; "successfail" = только Успех/Провал
     useRegex: false,
     selectedRegexOutgoing: [],
     selectedRegexIncoming: [],
@@ -6216,9 +6216,8 @@ function renderInlineActionButtons(container) {
     return b;
   };
 
-  // Механик машин: кнопки кубика — первыми.
-  bar.appendChild(mk("🎲 Бросок", () => mmDoRoll()));
-  bar.appendChild(mk("🎲 Промпт броска", () => mmOpenDiceSettings()));
+  // Механик машин: кубик — одна кнопка (всё в одном окне), первой.
+  bar.appendChild(mk("🎲 Кубик", () => mmOpenDiceSettings()));
 
   bar.appendChild(
     mk("🧠 " + translate("Create Memory", "STMemoryBooks_CreateMemoryButton"), async () => {
@@ -6385,29 +6384,34 @@ function mmRenderRoll(mes) {
     block.className = "mm-dice";
     textEl.after(block);
   }
+  const mode = (initializeSettings().moduleSettings.mmDiceMode) || "dice";
   const n = mmRollDie(20);
-  const success = n >= 11;
+  let body;
+  if (mode === "successfail") {
+    const success = n >= 11;
+    body = `<b class="mm-dice-${success ? "ok" : "fail"}">${success ? "Успех" : "Провал"}</b>`;
+  } else {
+    body = `<span class="mm-dice-num">🎲 ${n}</span>`;
+  }
   block.innerHTML =
-    `<span class="mm-dice-num">🎲 ${n}</span> — ` +
-    `<b class="mm-dice-${success ? "ok" : "fail"}">${success ? "Успех" : "Провал"}</b> ` +
-    `<span class="menu_button mm-dice-reroll" title="Бросить заново">Бросить</span>`;
+    `${body} <span class="menu_button mm-dice-reroll" title="Бросить заново">Бросить</span>`;
   block.querySelector(".mm-dice-reroll").addEventListener("click", () => mmRenderRoll(mes));
 }
 
-// Бросок под последним сообщением чата.
-export function mmDoRoll() {
-  const settings = initializeSettings();
-  if (!settings.moduleSettings.mmDiceEnabled) {
-    toastr.info("Режим кубика выключен — включи в «🎲 Промпт броска».", "Механик машин");
-    return;
-  }
+// Бросок под последним сообщением (без проверки режима — для кнопки «Бросить сейчас»).
+function mmRollLastMessage() {
   const chat = document.getElementById("chat");
   const last = chat ? chat.querySelector(".mes:last-of-type") : null;
-  if (!last) {
-    toastr.warning("Нет сообщений в чате.", "Механик машин");
-    return;
-  }
-  mmRenderRoll(last);
+  if (last) mmRenderRoll(last);
+}
+
+// Авто-бросок на каждый ответ ИИ (вызывается из machineMechanic по событию рендера).
+export function mmAutoRollOnMessage(mesId) {
+  const settings = initializeSettings();
+  if (!settings.moduleSettings.mmDiceEnabled) return;
+  const mes = document.querySelector(`#chat .mes[mesid="${mesId}"]`);
+  if (!mes || mes.getAttribute("is_user") === "true") return; // только ответы ИИ
+  mmRenderRoll(mes);
 }
 
 // Окно: вкл/выкл режим, промпт поведения на бросок, режим успех/провал.
@@ -6421,13 +6425,16 @@ export async function mmOpenDiceSettings() {
       <label style="display:flex; gap:8px; align-items:center; margin:8px 0;">
         <input type="checkbox" id="mm-dice-enabled" ${ms.mmDiceEnabled ? "checked" : ""}/> Включить режим кубика
       </label>
-      <label style="display:block; margin:8px 0 4px;">Режим:</label>
+      <label style="display:block; margin:8px 0 4px;">Режим (одно из двух):</label>
       <select id="mm-dice-mode" class="text_pole" style="width:100%;">
-        <option value="success-fail" selected>Успех / Провал (d20, 11+)</option>
+        <option value="dice" ${(ms.mmDiceMode || "dice") !== "successfail" ? "selected" : ""}>🎲 Кубик (число d20)</option>
+        <option value="successfail" ${ms.mmDiceMode === "successfail" ? "selected" : ""}>✅ Успех / Провал</option>
       </select>
+      <p style="opacity:.7; font-size:.85em; margin:4px 0 0;">Включённый режим бросает автоматически перед каждым ответом ИИ (под сообщением).</p>
       <label style="display:block; margin:12px 0 4px;">Промпт (как ИИ учитывает бросок):</label>
       <textarea id="mm-dice-prompt" class="text_pole" rows="5" style="width:100%;">${escapeHtml(curPrompt)}</textarea>
       <div class="stmb-button-row" style="margin-top:10px;">
+        <div class="menu_button" id="mm-dice-roll-now">🎲 Бросить сейчас</div>
         <div class="menu_button" id="mm-dice-reset">↩ Сбросить промпт</div>
       </div>
     </div>`;
@@ -6440,6 +6447,11 @@ export async function mmOpenDiceSettings() {
     if (e.target && e.target.id === "mm-dice-reset") {
       const ta = popup.dlg.querySelector("#mm-dice-prompt");
       if (ta) ta.value = MM_DEFAULT_DICE_PROMPT;
+    }
+    if (e.target && e.target.id === "mm-dice-roll-now") {
+      const m = popup.dlg.querySelector("#mm-dice-mode")?.value;
+      if (m) ms.mmDiceMode = m; // предпросмотр в выбранном режиме
+      mmRollLastMessage();
     }
   });
   const res = await popup.show();

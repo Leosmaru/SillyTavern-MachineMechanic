@@ -9,7 +9,7 @@
 // убирают сообщение — чат встаёт как был.
 // ============================================================================
 
-import { mmOpenInline, mmTranslateText } from "./index.build.js";
+import { mmOpenInline, mmTranslateText, mmAutoRollOnMessage } from "./index.build.js";
 
 const PANEL_ID = "mm-panel";
 const BUTTON_ID = "mm-wand-button";
@@ -232,5 +232,16 @@ jQuery(() => {
     $(document).on("click", `#${BUTTON_ID}`, openPanel);
     $(document).on("click", `#${PANEL_ID} .mm-close`, closePanel);
     watchTranslateButtons();
-    console.log("[Механик машин] Готово: 🔧 интерфейс + 🌐 перевод сообщений.");
+
+    // Авто-бросок кубика на каждый ответ ИИ (если режим включён).
+    const ctx = (typeof SillyTavern !== "undefined" && SillyTavern.getContext)
+        ? SillyTavern.getContext() : null;
+    if (ctx?.eventSource && ctx?.eventTypes) {
+        const ev = ctx.eventTypes.CHARACTER_MESSAGE_RENDERED || ctx.eventTypes.MESSAGE_RECEIVED;
+        ctx.eventSource.on(ev, (id) => {
+            try { mmAutoRollOnMessage(id); } catch (e) { /* noop */ }
+        });
+    }
+
+    console.log("[Механик машин] Готово: 🔧 интерфейс + 🌐 перевод + 🎲 кубик.");
 });

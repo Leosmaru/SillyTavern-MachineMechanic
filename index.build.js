@@ -18248,7 +18248,8 @@ var defaultSettings = {
     // Механик машин: бросок кубика
     mmDiceEnabled: false,
     mmDicePrompt: MM_DEFAULT_DICE_PROMPT,
-    mmDiceMode: "success-fail",
+    mmDiceMode: "dice",
+    // "dice" = число d20; "successfail" = только Успех/Провал
     useRegex: false,
     selectedRegexOutgoing: [],
     selectedRegexIncoming: [],
@@ -22892,8 +22893,7 @@ function renderInlineActionButtons(container) {
     b.addEventListener("click", action);
     return b;
   };
-  bar.appendChild(mk("\u{1F3B2} \u0411\u0440\u043E\u0441\u043E\u043A", () => mmDoRoll()));
-  bar.appendChild(mk("\u{1F3B2} \u041F\u0440\u043E\u043C\u043F\u0442 \u0431\u0440\u043E\u0441\u043A\u0430", () => mmOpenDiceSettings()));
+  bar.appendChild(mk("\u{1F3B2} \u041A\u0443\u0431\u0438\u043A", () => mmOpenDiceSettings()));
   bar.appendChild(
     mk("\u{1F9E0} " + translate20("Create Memory", "STMemoryBooks_CreateMemoryButton"), async () => {
       const markers = getSceneMarkers() || {};
@@ -23030,24 +23030,29 @@ function mmRenderRoll(mes) {
     block.className = "mm-dice";
     textEl.after(block);
   }
+  const mode = initializeSettings().moduleSettings.mmDiceMode || "dice";
   const n = mmRollDie(20);
-  const success = n >= 11;
-  block.innerHTML = `<span class="mm-dice-num">\u{1F3B2} ${n}</span> \u2014 <b class="mm-dice-${success ? "ok" : "fail"}">${success ? "\u0423\u0441\u043F\u0435\u0445" : "\u041F\u0440\u043E\u0432\u0430\u043B"}</b> <span class="menu_button mm-dice-reroll" title="\u0411\u0440\u043E\u0441\u0438\u0442\u044C \u0437\u0430\u043D\u043E\u0432\u043E">\u0411\u0440\u043E\u0441\u0438\u0442\u044C</span>`;
+  let body;
+  if (mode === "successfail") {
+    const success = n >= 11;
+    body = `<b class="mm-dice-${success ? "ok" : "fail"}">${success ? "\u0423\u0441\u043F\u0435\u0445" : "\u041F\u0440\u043E\u0432\u0430\u043B"}</b>`;
+  } else {
+    body = `<span class="mm-dice-num">\u{1F3B2} ${n}</span>`;
+  }
+  block.innerHTML = `${body} <span class="menu_button mm-dice-reroll" title="\u0411\u0440\u043E\u0441\u0438\u0442\u044C \u0437\u0430\u043D\u043E\u0432\u043E">\u0411\u0440\u043E\u0441\u0438\u0442\u044C</span>`;
   block.querySelector(".mm-dice-reroll").addEventListener("click", () => mmRenderRoll(mes));
 }
-function mmDoRoll() {
-  const settings = initializeSettings();
-  if (!settings.moduleSettings.mmDiceEnabled) {
-    toastr.info("\u0420\u0435\u0436\u0438\u043C \u043A\u0443\u0431\u0438\u043A\u0430 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D \u2014 \u0432\u043A\u043B\u044E\u0447\u0438 \u0432 \xAB\u{1F3B2} \u041F\u0440\u043E\u043C\u043F\u0442 \u0431\u0440\u043E\u0441\u043A\u0430\xBB.", "\u041C\u0435\u0445\u0430\u043D\u0438\u043A \u043C\u0430\u0448\u0438\u043D");
-    return;
-  }
+function mmRollLastMessage() {
   const chat6 = document.getElementById("chat");
   const last = chat6 ? chat6.querySelector(".mes:last-of-type") : null;
-  if (!last) {
-    toastr.warning("\u041D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0439 \u0432 \u0447\u0430\u0442\u0435.", "\u041C\u0435\u0445\u0430\u043D\u0438\u043A \u043C\u0430\u0448\u0438\u043D");
-    return;
-  }
-  mmRenderRoll(last);
+  if (last) mmRenderRoll(last);
+}
+function mmAutoRollOnMessage(mesId) {
+  const settings = initializeSettings();
+  if (!settings.moduleSettings.mmDiceEnabled) return;
+  const mes = document.querySelector(`#chat .mes[mesid="${mesId}"]`);
+  if (!mes || mes.getAttribute("is_user") === "true") return;
+  mmRenderRoll(mes);
 }
 async function mmOpenDiceSettings() {
   const settings = initializeSettings();
@@ -23059,13 +23064,16 @@ async function mmOpenDiceSettings() {
       <label style="display:flex; gap:8px; align-items:center; margin:8px 0;">
         <input type="checkbox" id="mm-dice-enabled" ${ms.mmDiceEnabled ? "checked" : ""}/> \u0412\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u0440\u0435\u0436\u0438\u043C \u043A\u0443\u0431\u0438\u043A\u0430
       </label>
-      <label style="display:block; margin:8px 0 4px;">\u0420\u0435\u0436\u0438\u043C:</label>
+      <label style="display:block; margin:8px 0 4px;">\u0420\u0435\u0436\u0438\u043C (\u043E\u0434\u043D\u043E \u0438\u0437 \u0434\u0432\u0443\u0445):</label>
       <select id="mm-dice-mode" class="text_pole" style="width:100%;">
-        <option value="success-fail" selected>\u0423\u0441\u043F\u0435\u0445 / \u041F\u0440\u043E\u0432\u0430\u043B (d20, 11+)</option>
+        <option value="dice" ${(ms.mmDiceMode || "dice") !== "successfail" ? "selected" : ""}>\u{1F3B2} \u041A\u0443\u0431\u0438\u043A (\u0447\u0438\u0441\u043B\u043E d20)</option>
+        <option value="successfail" ${ms.mmDiceMode === "successfail" ? "selected" : ""}>\u2705 \u0423\u0441\u043F\u0435\u0445 / \u041F\u0440\u043E\u0432\u0430\u043B</option>
       </select>
+      <p style="opacity:.7; font-size:.85em; margin:4px 0 0;">\u0412\u043A\u043B\u044E\u0447\u0451\u043D\u043D\u044B\u0439 \u0440\u0435\u0436\u0438\u043C \u0431\u0440\u043E\u0441\u0430\u0435\u0442 \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438 \u043F\u0435\u0440\u0435\u0434 \u043A\u0430\u0436\u0434\u044B\u043C \u043E\u0442\u0432\u0435\u0442\u043E\u043C \u0418\u0418 (\u043F\u043E\u0434 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435\u043C).</p>
       <label style="display:block; margin:12px 0 4px;">\u041F\u0440\u043E\u043C\u043F\u0442 (\u043A\u0430\u043A \u0418\u0418 \u0443\u0447\u0438\u0442\u044B\u0432\u0430\u0435\u0442 \u0431\u0440\u043E\u0441\u043E\u043A):</label>
       <textarea id="mm-dice-prompt" class="text_pole" rows="5" style="width:100%;">${escapeHtml6(curPrompt)}</textarea>
       <div class="stmb-button-row" style="margin-top:10px;">
+        <div class="menu_button" id="mm-dice-roll-now">\u{1F3B2} \u0411\u0440\u043E\u0441\u0438\u0442\u044C \u0441\u0435\u0439\u0447\u0430\u0441</div>
         <div class="menu_button" id="mm-dice-reset">\u21A9 \u0421\u0431\u0440\u043E\u0441\u0438\u0442\u044C \u043F\u0440\u043E\u043C\u043F\u0442</div>
       </div>
     </div>`;
@@ -23078,6 +23086,11 @@ async function mmOpenDiceSettings() {
     if (e.target && e.target.id === "mm-dice-reset") {
       const ta = popup.dlg.querySelector("#mm-dice-prompt");
       if (ta) ta.value = MM_DEFAULT_DICE_PROMPT;
+    }
+    if (e.target && e.target.id === "mm-dice-roll-now") {
+      const m = popup.dlg.querySelector("#mm-dice-mode")?.value;
+      if (m) ms.mmDiceMode = m;
+      mmRollLastMessage();
     }
   });
   const res = await popup.show();
@@ -25148,7 +25161,7 @@ $(document).ready(() => {
 export {
   currentProfile,
   isMemoryProcessing,
-  mmDoRoll,
+  mmAutoRollOnMessage,
   mmOpenDiceSettings,
   mmOpenInline,
   mmOpenTranslateSettings,
