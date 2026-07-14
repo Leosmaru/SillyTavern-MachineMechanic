@@ -22893,7 +22893,21 @@ function renderInlineActionButtons(container) {
     b.addEventListener("click", action);
     return b;
   };
-  bar.appendChild(mk("\u{1F3B2} \u041A\u0443\u0431\u0438\u043A", () => mmOpenDiceSettings()));
+  const diceToggle = document.createElement("div");
+  diceToggle.className = "menu_button mm-dice-toggle";
+  diceToggle.innerHTML = `<input type="checkbox" class="mm-dice-check" ${initializeSettings().moduleSettings.mmDiceEnabled ? "checked" : ""}/> \u{1F3B2} \u041A\u0443\u0431\u0438\u043A`;
+  diceToggle.querySelector(".mm-dice-check").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const s = initializeSettings();
+    s.moduleSettings.mmDiceEnabled = e.target.checked;
+    saveSettingsDebounced6();
+    toastr.info(e.target.checked ? "\u041A\u0443\u0431\u0438\u043A \u0432\u043A\u043B\u044E\u0447\u0451\u043D" : "\u041A\u0443\u0431\u0438\u043A \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D", "\u041C\u0435\u0445\u0430\u043D\u0438\u043A \u043C\u0430\u0448\u0438\u043D");
+  });
+  diceToggle.addEventListener("click", (e) => {
+    if (e.target.classList.contains("mm-dice-check")) return;
+    mmOpenDiceSettings();
+  });
+  bar.appendChild(diceToggle);
   bar.appendChild(
     mk("\u{1F9E0} " + translate20("Create Memory", "STMemoryBooks_CreateMemoryButton"), async () => {
       const markers = getSceneMarkers() || {};

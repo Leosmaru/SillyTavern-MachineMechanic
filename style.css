@@ -731,3 +731,15 @@
     cursor: pointer;
     padding: 2px 10px;
 }
+
+/* Механик машин — чекбокс на кнопке кубика */
+.mm-dice-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+.mm-dice-toggle .mm-dice-check {
+    margin: 0;
+    cursor: pointer;
+}

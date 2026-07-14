@@ -6216,8 +6216,23 @@ function renderInlineActionButtons(container) {
     return b;
   };
 
-  // Механик машин: кубик — одна кнопка (всё в одном окне), первой.
-  bar.appendChild(mk("🎲 Кубик", () => mmOpenDiceSettings()));
+  // Механик машин: кубик — кнопка с чекбоксом (галка = режим вкл/выкл),
+  // клик по тексту открывает меню. Первой.
+  const diceToggle = document.createElement("div");
+  diceToggle.className = "menu_button mm-dice-toggle";
+  diceToggle.innerHTML = `<input type="checkbox" class="mm-dice-check" ${initializeSettings().moduleSettings.mmDiceEnabled ? "checked" : ""}/> 🎲 Кубик`;
+  diceToggle.querySelector(".mm-dice-check").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const s = initializeSettings();
+    s.moduleSettings.mmDiceEnabled = e.target.checked;
+    saveSettingsDebounced();
+    toastr.info(e.target.checked ? "Кубик включён" : "Кубик выключен", "Механик машин");
+  });
+  diceToggle.addEventListener("click", (e) => {
+    if (e.target.classList.contains("mm-dice-check")) return;
+    mmOpenDiceSettings();
+  });
+  bar.appendChild(diceToggle);
 
   bar.appendChild(
     mk("🧠 " + translate("Create Memory", "STMemoryBooks_CreateMemoryButton"), async () => {
