@@ -353,7 +353,7 @@ const MM_DEFAULT_TRANSLATE_PROMPT =
 
 // Механик машин: промпт поведения ИИ на бросок кубика (редактируется в настройках).
 const MM_DEFAULT_DICE_PROMPT =
-  "You MUST strictly obey the dice outcome for the last attempted action. It is a hard rule, not a suggestion. FAILURE = the action clearly does NOT work: never write it as a success or partial success — show it going wrong with a real, immediate consequence. SUCCESS = it works well. Do not mention the roll, dice, or numbers in the reply.";
+  "You MUST strictly obey the dice outcome for the last attempted action. It is a hard rule, not a suggestion. If a d20 number is given, scale the result to it: the lower the number the worse and more critical the failure, the higher the better and more critical the success (1 = catastrophe, 20 = triumph). FAILURE means the action clearly does NOT work — never write it as a success. Do not mention the roll, dice, or numbers in the reply.";
 
 const defaultSettings = {
   moduleSettings: {
@@ -6451,7 +6451,7 @@ function mmRollInnerHtml(r, mode) {
   if (mode === "successfail") {
     return `<b class="mm-dice-${r.success ? "ok" : "fail"}">${r.success ? "Успех" : "Провал"}</b>`;
   }
-  return `<span class="mm-dice-num">🎲 ${r.n}</span>`;
+  return `<span class="mm-dice-num mm-dice-${r.success ? "ok" : "fail"}">🎲 ${r.n}</span>`;
 }
 
 // roll — если передан, показываем именно это значение (что ушло в ИИ), иначе кидаем заново.
@@ -6499,10 +6499,22 @@ export function mmOnGenerationStart(type, _options, dryRun) {
   mmLastRoll = r;
   const mode = ms.mmDiceMode || "dice";
   const prompt = ms.mmDicePrompt || MM_DEFAULT_DICE_PROMPT;
-  const num = mode === "successfail" ? "" : ` (d20=${r.n})`;
-  const outcome = r.success
-    ? `ACTION ROLL: SUCCESS${num}. The last attempted action clearly SUCCEEDS.`
-    : `ACTION ROLL: FAILURE${num}. The last attempted action clearly FAILS — do NOT let it succeed or partially succeed; show it going wrong with a real negative consequence.`;
+  let outcome;
+  if (mode === "successfail") {
+    outcome = r.success
+      ? "ACTION ROLL: SUCCESS. The last attempted action clearly SUCCEEDS."
+      : "ACTION ROLL: FAILURE. The last attempted action clearly FAILS — do NOT let it succeed or partially succeed; show it going wrong with a real negative consequence.";
+  } else {
+    const n = r.n;
+    let tier;
+    if (n === 1) tier = "CRITICAL FAILURE (worst possible) — it goes disastrously wrong";
+    else if (n <= 5) tier = "SEVERE FAILURE — it fails badly";
+    else if (n <= 10) tier = "FAILURE — it does not work";
+    else if (n <= 15) tier = "SUCCESS — it works";
+    else if (n <= 19) tier = "STRONG SUCCESS — it works very well";
+    else tier = "CRITICAL SUCCESS (best possible) — an extraordinary result";
+    outcome = `ACTION ROLL: d20 = ${n}/20 -> ${tier}. Scale the outcome strictly to this number: the lower the number, the worse and more severe; the higher, the better and more impressive. Do NOT soften a low roll into a success.`;
+  }
   const injection = `[Dice mechanic — obey strictly. ${prompt}\n>>> ${outcome} <<<]`;
   try {
     // IN_CHAT (1), глубина 0, роль SYSTEM (0) — видит только модель, в чат не пишется.
@@ -6530,6 +6542,13 @@ export function mmShowRollOnMessage(mesId) {
   if (!ms.mmDiceEnabled) return;
   const mes = document.querySelector(`#chat .mes[mesid="${mesId}"]`);
   if (!mes || mes.getAttribute("is_user") === "true") return; // только ответы ИИ
+  // Убрать прошлый блок броска этого сообщения (перегенерация/свайп).
+  let prev = mes.previousElementSibling;
+  while (prev && prev.classList && prev.classList.contains("mm-dice-above")) {
+    const rm = prev;
+    prev = prev.previousElementSibling;
+    rm.remove();
+  }
   if (mmPendingBlock) {
     mes.before(mmPendingBlock); // поставить над сообщением
     mmPendingBlock = null;
