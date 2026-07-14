@@ -9,7 +9,7 @@
 // убирают сообщение — чат встаёт как был.
 // ============================================================================
 
-import { mmOpenInline, mmTranslateText, mmAutoRollOnMessage } from "./index.build.js";
+import { mmOpenInline, mmTranslateText, mmOnGenerationStart, mmShowRollOnMessage } from "./index.build.js";
 
 const PANEL_ID = "mm-panel";
 const BUTTON_ID = "mm-wand-button";
@@ -237,9 +237,14 @@ jQuery(() => {
     const ctx = (typeof SillyTavern !== "undefined" && SillyTavern.getContext)
         ? SillyTavern.getContext() : null;
     if (ctx?.eventSource && ctx?.eventTypes) {
-        const ev = ctx.eventTypes.CHARACTER_MESSAGE_RENDERED || ctx.eventTypes.MESSAGE_RECEIVED;
-        ctx.eventSource.on(ev, (id) => {
-            try { mmAutoRollOnMessage(id); } catch (e) { /* noop */ }
+        // Перед генерацией — кинуть кубик и отдать результат в промпт (инъекция).
+        ctx.eventSource.on(ctx.eventTypes.GENERATION_STARTED, (type, options, dryRun) => {
+            try { mmOnGenerationStart(type, options, dryRun); } catch (e) { /* noop */ }
+        });
+        // После ответа — показать под сообщением то число, что ушло в ИИ.
+        const rendered = ctx.eventTypes.CHARACTER_MESSAGE_RENDERED || ctx.eventTypes.MESSAGE_RECEIVED;
+        ctx.eventSource.on(rendered, (id) => {
+            try { mmShowRollOnMessage(id); } catch (e) { /* noop */ }
         });
     }
 

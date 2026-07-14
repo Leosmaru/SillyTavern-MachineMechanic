@@ -6390,7 +6390,15 @@ function mmRollDie(sides = 20) {
 }
 
 // Рисует блок броска под сообщением (плагин сам рисует число, не ИИ).
-function mmRenderRoll(mes) {
+let mmLastRoll = null; // { n, success } — бросок текущего хода (что ушло в ИИ)
+
+function mmRollValue() {
+  const n = mmRollDie(20);
+  return { n, success: n >= 11 };
+}
+
+// roll — если передан, показываем именно это значение (что ушло в ИИ), иначе кидаем заново.
+function mmRenderRoll(mes, roll) {
   const textEl = mes.querySelector(".mes_text");
   if (!textEl) return;
   let block = mes.querySelector(".mm-dice");
@@ -6400,33 +6408,59 @@ function mmRenderRoll(mes) {
     textEl.after(block);
   }
   const mode = (initializeSettings().moduleSettings.mmDiceMode) || "dice";
-  const n = mmRollDie(20);
+  const r = roll || mmRollValue();
   let body;
   if (mode === "successfail") {
-    const success = n >= 11;
-    body = `<b class="mm-dice-${success ? "ok" : "fail"}">${success ? "Успех" : "Провал"}</b>`;
+    body = `<b class="mm-dice-${r.success ? "ok" : "fail"}">${r.success ? "Успех" : "Провал"}</b>`;
   } else {
-    body = `<span class="mm-dice-num">🎲 ${n}</span>`;
+    body = `<span class="mm-dice-num">🎲 ${r.n}</span>`;
   }
   block.innerHTML =
     `${body} <span class="menu_button mm-dice-reroll" title="Бросить заново">Бросить</span>`;
   block.querySelector(".mm-dice-reroll").addEventListener("click", () => mmRenderRoll(mes));
 }
 
-// Бросок под последним сообщением (без проверки режима — для кнопки «Бросить сейчас»).
+// Бросок под последним сообщением (для кнопки «Бросить сейчас», предпросмотр).
 function mmRollLastMessage() {
   const chat = document.getElementById("chat");
-  const last = chat ? chat.querySelector(".mes:last-of-type") : null;
+  const msgs = chat ? [...chat.querySelectorAll(".mes[mesid]")] : [];
+  const last = msgs[msgs.length - 1];
   if (last) mmRenderRoll(last);
 }
 
-// Авто-бросок на каждый ответ ИИ (вызывается из machineMechanic по событию рендера).
-export function mmAutoRollOnMessage(mesId) {
-  const settings = initializeSettings();
-  if (!settings.moduleSettings.mmDiceEnabled) return;
+// ПЕРЕД генерацией: кинуть кубик и отдать результат+промпт нейронке (скрытая инъекция).
+export function mmOnGenerationStart(type, _options, dryRun) {
+  const ms = initializeSettings().moduleSettings;
+  const clear = () => {
+    try { SillyTavern.getContext().setExtensionPrompt("MM_DICE_ROLL", ""); } catch (e) {}
+  };
+  if (!ms.mmDiceEnabled) { clear(); return; }
+  if (dryRun) return;
+  if (type === "quiet" || type === "impersonate") return; // не основной ответ
+
+  const r = mmRollValue();
+  mmLastRoll = r;
+  const mode = ms.mmDiceMode || "dice";
+  const prompt = ms.mmDicePrompt || MM_DEFAULT_DICE_PROMPT;
+  const outcome = mode === "successfail"
+    ? `Action outcome roll: ${r.success ? "SUCCESS" : "FAILURE"}.`
+    : `Dice roll: d20 = ${r.n} (${r.success ? "success" : "failure"}).`;
+  const injection = `[${prompt}\n${outcome}]`;
+  try {
+    // IN_CHAT (1), глубина 0, роль SYSTEM (0) — видит только модель, в чат не пишется.
+    SillyTavern.getContext().setExtensionPrompt("MM_DICE_ROLL", injection, 1, 0, false, 0);
+  } catch (e) {
+    console.warn("[Механик машин] Инъекция броска не удалась:", e);
+  }
+}
+
+// ПОСЛЕ ответа: показать под сообщением то число, что ушло в ИИ.
+export function mmShowRollOnMessage(mesId) {
+  const ms = initializeSettings().moduleSettings;
+  if (!ms.mmDiceEnabled || !mmLastRoll) return;
   const mes = document.querySelector(`#chat .mes[mesid="${mesId}"]`);
   if (!mes || mes.getAttribute("is_user") === "true") return; // только ответы ИИ
-  mmRenderRoll(mes);
+  mmRenderRoll(mes, mmLastRoll);
 }
 
 // Окно: вкл/выкл режим, промпт поведения на бросок, режим успех/провал.

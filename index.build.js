@@ -23035,7 +23035,12 @@ function mmRandom() {
 function mmRollDie(sides = 20) {
   return 1 + Math.floor(mmRandom() * sides);
 }
-function mmRenderRoll(mes) {
+var mmLastRoll = null;
+function mmRollValue() {
+  const n = mmRollDie(20);
+  return { n, success: n >= 11 };
+}
+function mmRenderRoll(mes, roll) {
   const textEl = mes.querySelector(".mes_text");
   if (!textEl) return;
   let block = mes.querySelector(".mm-dice");
@@ -23045,28 +23050,55 @@ function mmRenderRoll(mes) {
     textEl.after(block);
   }
   const mode = initializeSettings().moduleSettings.mmDiceMode || "dice";
-  const n = mmRollDie(20);
+  const r = roll || mmRollValue();
   let body;
   if (mode === "successfail") {
-    const success = n >= 11;
-    body = `<b class="mm-dice-${success ? "ok" : "fail"}">${success ? "\u0423\u0441\u043F\u0435\u0445" : "\u041F\u0440\u043E\u0432\u0430\u043B"}</b>`;
+    body = `<b class="mm-dice-${r.success ? "ok" : "fail"}">${r.success ? "\u0423\u0441\u043F\u0435\u0445" : "\u041F\u0440\u043E\u0432\u0430\u043B"}</b>`;
   } else {
-    body = `<span class="mm-dice-num">\u{1F3B2} ${n}</span>`;
+    body = `<span class="mm-dice-num">\u{1F3B2} ${r.n}</span>`;
   }
   block.innerHTML = `${body} <span class="menu_button mm-dice-reroll" title="\u0411\u0440\u043E\u0441\u0438\u0442\u044C \u0437\u0430\u043D\u043E\u0432\u043E">\u0411\u0440\u043E\u0441\u0438\u0442\u044C</span>`;
   block.querySelector(".mm-dice-reroll").addEventListener("click", () => mmRenderRoll(mes));
 }
 function mmRollLastMessage() {
   const chat6 = document.getElementById("chat");
-  const last = chat6 ? chat6.querySelector(".mes:last-of-type") : null;
+  const msgs = chat6 ? [...chat6.querySelectorAll(".mes[mesid]")] : [];
+  const last = msgs[msgs.length - 1];
   if (last) mmRenderRoll(last);
 }
-function mmAutoRollOnMessage(mesId) {
-  const settings = initializeSettings();
-  if (!settings.moduleSettings.mmDiceEnabled) return;
+function mmOnGenerationStart(type, _options, dryRun) {
+  const ms = initializeSettings().moduleSettings;
+  const clear = () => {
+    try {
+      SillyTavern.getContext().setExtensionPrompt("MM_DICE_ROLL", "");
+    } catch (e) {
+    }
+  };
+  if (!ms.mmDiceEnabled) {
+    clear();
+    return;
+  }
+  if (dryRun) return;
+  if (type === "quiet" || type === "impersonate") return;
+  const r = mmRollValue();
+  mmLastRoll = r;
+  const mode = ms.mmDiceMode || "dice";
+  const prompt = ms.mmDicePrompt || MM_DEFAULT_DICE_PROMPT;
+  const outcome = mode === "successfail" ? `Action outcome roll: ${r.success ? "SUCCESS" : "FAILURE"}.` : `Dice roll: d20 = ${r.n} (${r.success ? "success" : "failure"}).`;
+  const injection = `[${prompt}
+${outcome}]`;
+  try {
+    SillyTavern.getContext().setExtensionPrompt("MM_DICE_ROLL", injection, 1, 0, false, 0);
+  } catch (e) {
+    console.warn("[\u041C\u0435\u0445\u0430\u043D\u0438\u043A \u043C\u0430\u0448\u0438\u043D] \u0418\u043D\u044A\u0435\u043A\u0446\u0438\u044F \u0431\u0440\u043E\u0441\u043A\u0430 \u043D\u0435 \u0443\u0434\u0430\u043B\u0430\u0441\u044C:", e);
+  }
+}
+function mmShowRollOnMessage(mesId) {
+  const ms = initializeSettings().moduleSettings;
+  if (!ms.mmDiceEnabled || !mmLastRoll) return;
   const mes = document.querySelector(`#chat .mes[mesid="${mesId}"]`);
   if (!mes || mes.getAttribute("is_user") === "true") return;
-  mmRenderRoll(mes);
+  mmRenderRoll(mes, mmLastRoll);
 }
 async function mmOpenDiceSettings() {
   const settings = initializeSettings();
@@ -25175,10 +25207,11 @@ $(document).ready(() => {
 export {
   currentProfile,
   isMemoryProcessing,
-  mmAutoRollOnMessage,
+  mmOnGenerationStart,
   mmOpenDiceSettings,
   mmOpenInline,
   mmOpenTranslateSettings,
+  mmShowRollOnMessage,
   mmTranslateText,
   validateLorebook
 };
