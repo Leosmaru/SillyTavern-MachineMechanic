@@ -383,7 +383,8 @@ const defaultSettings = {
     compactionProfileIndex: 0,
     // Механик машин: перевод сообщений
     mmTranslatePrompt: MM_DEFAULT_TRANSLATE_PROMPT,
-    mmTranslateProfileIndex: null, // null = тот же профиль, что основной
+    mmTranslateProfileIndex: null, // (устар.) профиль плагина для отката
+    mmTranslateConnProfileId: "",  // id профиля подключения SillyTavern
     mmTranslateTempOverride: false, // галочка «своя температура»
     mmTranslateTemp: 0.3,
     // Механик машин: бросок кубика
@@ -6287,6 +6288,34 @@ function renderInlineActionButtons(container) {
 export async function mmTranslateText(text, profileIndexArg = null) {
   const settings = initializeSettings();
   const ms = settings.moduleSettings;
+
+  // Путь через ПРОФИЛЬ ПОДКЛЮЧЕНИЯ SillyTavern — в изоляции:
+  // includePreset:false → без чужих системных промптов и порядка, только наш промпт.
+  const connId = ms.mmTranslateConnProfileId;
+  if (connId) {
+    try {
+      const ctx = SillyTavern.getContext();
+      const promptText0 = ms.mmTranslatePrompt || MM_DEFAULT_TRANSLATE_PROMPT;
+      const messages = [
+        { role: "system", content: promptText0 },
+        { role: "user", content: text },
+      ];
+      const override = {};
+      if (ms.mmTranslateTempOverride) override.temperature = Number(ms.mmTranslateTemp);
+      const maxTokens = Math.min(8192, Math.max(1024, Math.ceil((text || "").length / 2)));
+      const data = await ctx.ConnectionManagerRequestService.sendRequest(
+        connId,
+        messages,
+        maxTokens,
+        { includePreset: false, includeInstruct: false, extractData: true },
+        override,
+      );
+      return String((data && (data.content ?? "")) || "").trim();
+    } catch (e) {
+      console.warn("[Механик машин] Профиль подключения не сработал, откат:", e);
+    }
+  }
+
   let idx = profileIndexArg;
   if (idx == null) {
     idx = ms.mmTranslateProfileIndex == null ? settings.defaultProfile : ms.mmTranslateProfileIndex;
@@ -6334,12 +6363,14 @@ export async function mmOpenTranslateSettings() {
   const settings = initializeSettings();
   const ms = settings.moduleSettings;
   const curPrompt = ms.mmTranslatePrompt ?? MM_DEFAULT_TRANSLATE_PROMPT;
-  const curProfile = ms.mmTranslateProfileIndex;
+  const curConn = ms.mmTranslateConnProfileId || "";
 
-  const profileOptions = settings.profiles
+  const cm = SillyTavern.getContext().extensionSettings?.connectionManager;
+  const connProfiles = cm && Array.isArray(cm.profiles) ? cm.profiles : [];
+  const connOptions = connProfiles
     .map(
-      (p, i) =>
-        `<option value="${i}" ${String(curProfile) === String(i) ? "selected" : ""}>${escapeHtml(p.name || "Профиль " + i)}</option>`,
+      (p) =>
+        `<option value="${escapeHtml(p.id)}" ${curConn === p.id ? "selected" : ""}>${escapeHtml(p.name || p.id)}</option>`,
     )
     .join("");
 
@@ -6348,10 +6379,10 @@ export async function mmOpenTranslateSettings() {
       <h3 class="stmb-section-title">🌐 Перевод сообщений</h3>
       <label style="display:block; margin:8px 0 4px;">Промпт перевода:</label>
       <textarea id="mm-tr-prompt" class="text_pole" rows="6" style="width:100%;">${escapeHtml(curPrompt)}</textarea>
-      <label style="display:block; margin:12px 0 4px;">Профиль / модель:</label>
-      <select id="mm-tr-profile" class="text_pole" style="width:100%;">
-        <option value="" ${curProfile == null ? "selected" : ""}>Как основной (по умолчанию)</option>
-        ${profileOptions}
+      <label style="display:block; margin:12px 0 4px;">Профиль подключения (SillyTavern):</label>
+      <select id="mm-tr-conn" class="text_pole" style="width:100%;">
+        <option value="" ${!curConn ? "selected" : ""}>Текущее подключение (по умолчанию)</option>
+        ${connOptions}
       </select>
       <p style="opacity:.7; font-size:.85em; margin-top:8px;">В ИИ уходит только текст сообщения и этот промпт — без остальной истории чата.</p>
       <label style="display:flex; gap:8px; align-items:center; margin:10px 0 4px;">
@@ -6381,9 +6412,8 @@ export async function mmOpenTranslateSettings() {
   if (res !== POPUP_RESULT.AFFIRMATIVE) return;
 
   const prompt = popup.dlg.querySelector("#mm-tr-prompt")?.value ?? "";
-  const profVal = popup.dlg.querySelector("#mm-tr-profile")?.value ?? "";
   ms.mmTranslatePrompt = prompt.trim() || MM_DEFAULT_TRANSLATE_PROMPT;
-  ms.mmTranslateProfileIndex = profVal === "" ? null : parseInt(profVal, 10);
+  ms.mmTranslateConnProfileId = popup.dlg.querySelector("#mm-tr-conn")?.value || "";
   ms.mmTranslateTempOverride = !!popup.dlg.querySelector("#mm-tr-temp-enabled")?.checked;
   const t = parseFloat(popup.dlg.querySelector("#mm-tr-temp")?.value);
   if (Number.isFinite(t)) ms.mmTranslateTemp = Math.max(0, Math.min(2, t));
@@ -6405,11 +6435,20 @@ function mmRollDie(sides = 20) {
 }
 
 // Рисует блок броска под сообщением (плагин сам рисует число, не ИИ).
-let mmLastRoll = null; // { n, success } — бросок текущего хода (что ушло в ИИ)
+let mmLastRoll = null;    // { n, success } — бросок текущего хода (что ушло в ИИ)
+let mmPendingBlock = null; // блок результата, показанный над будущим сообщением
 
 function mmRollValue() {
   const n = mmRollDie(20);
   return { n, success: n >= 11 };
+}
+
+// Внутренний HTML результата по режиму (число / успех-провал).
+function mmRollInnerHtml(r, mode) {
+  if (mode === "successfail") {
+    return `<b class="mm-dice-${r.success ? "ok" : "fail"}">${r.success ? "Успех" : "Провал"}</b>`;
+  }
+  return `<span class="mm-dice-num">🎲 ${r.n}</span>`;
 }
 
 // roll — если передан, показываем именно это значение (что ушло в ИИ), иначе кидаем заново.
@@ -6468,15 +6507,35 @@ export function mmOnGenerationStart(type, _options, dryRun) {
   } catch (e) {
     console.warn("[Механик машин] Инъекция броска не удалась:", e);
   }
+
+  // Показать результат СРАЗУ (пока ИИ пишет) — над будущим сообщением.
+  const chat = document.getElementById("chat");
+  if (chat) {
+    if (mmPendingBlock) mmPendingBlock.remove();
+    const block = document.createElement("div");
+    block.className = "mm-dice mm-dice-above";
+    block.innerHTML = mmRollInnerHtml(r, mode);
+    chat.appendChild(block);
+    block.scrollIntoView({ block: "end" });
+    mmPendingBlock = block;
+  }
 }
 
-// ПОСЛЕ ответа: показать под сообщением то число, что ушло в ИИ.
+// ПОСЛЕ ответа: закрепить блок результата НАД сообщением ИИ.
 export function mmShowRollOnMessage(mesId) {
   const ms = initializeSettings().moduleSettings;
-  if (!ms.mmDiceEnabled || !mmLastRoll) return;
+  if (!ms.mmDiceEnabled) return;
   const mes = document.querySelector(`#chat .mes[mesid="${mesId}"]`);
   if (!mes || mes.getAttribute("is_user") === "true") return; // только ответы ИИ
-  mmRenderRoll(mes, mmLastRoll);
+  if (mmPendingBlock) {
+    mes.before(mmPendingBlock); // поставить над сообщением
+    mmPendingBlock = null;
+  } else if (mmLastRoll) {
+    const block = document.createElement("div");
+    block.className = "mm-dice mm-dice-above";
+    block.innerHTML = mmRollInnerHtml(mmLastRoll, ms.mmDiceMode || "dice");
+    mes.before(block);
+  }
 }
 
 // Окно: вкл/выкл режим, промпт поведения на бросок, режим успех/провал.

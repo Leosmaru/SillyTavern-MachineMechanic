@@ -18244,7 +18244,9 @@ var defaultSettings = {
     // Механик машин: перевод сообщений
     mmTranslatePrompt: MM_DEFAULT_TRANSLATE_PROMPT,
     mmTranslateProfileIndex: null,
-    // null = тот же профиль, что основной
+    // (устар.) профиль плагина для отката
+    mmTranslateConnProfileId: "",
+    // id профиля подключения SillyTavern
     mmTranslateTempOverride: false,
     // галочка «своя температура»
     mmTranslateTemp: 0.3,
@@ -22951,6 +22953,30 @@ function renderInlineActionButtons(container) {
 async function mmTranslateText(text, profileIndexArg = null) {
   const settings = initializeSettings();
   const ms = settings.moduleSettings;
+  const connId = ms.mmTranslateConnProfileId;
+  if (connId) {
+    try {
+      const ctx = SillyTavern.getContext();
+      const promptText0 = ms.mmTranslatePrompt || MM_DEFAULT_TRANSLATE_PROMPT;
+      const messages = [
+        { role: "system", content: promptText0 },
+        { role: "user", content: text }
+      ];
+      const override = {};
+      if (ms.mmTranslateTempOverride) override.temperature = Number(ms.mmTranslateTemp);
+      const maxTokens = Math.min(8192, Math.max(1024, Math.ceil((text || "").length / 2)));
+      const data = await ctx.ConnectionManagerRequestService.sendRequest(
+        connId,
+        messages,
+        maxTokens,
+        { includePreset: false, includeInstruct: false, extractData: true },
+        override
+      );
+      return String(data && (data.content ?? "") || "").trim();
+    } catch (e) {
+      console.warn("[\u041C\u0435\u0445\u0430\u043D\u0438\u043A \u043C\u0430\u0448\u0438\u043D] \u041F\u0440\u043E\u0444\u0438\u043B\u044C \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F \u043D\u0435 \u0441\u0440\u0430\u0431\u043E\u0442\u0430\u043B, \u043E\u0442\u043A\u0430\u0442:", e);
+    }
+  }
   let idx = profileIndexArg;
   if (idx == null) {
     idx = ms.mmTranslateProfileIndex == null ? settings.defaultProfile : ms.mmTranslateProfileIndex;
@@ -22990,19 +23016,21 @@ async function mmOpenTranslateSettings() {
   const settings = initializeSettings();
   const ms = settings.moduleSettings;
   const curPrompt = ms.mmTranslatePrompt ?? MM_DEFAULT_TRANSLATE_PROMPT;
-  const curProfile = ms.mmTranslateProfileIndex;
-  const profileOptions = settings.profiles.map(
-    (p, i) => `<option value="${i}" ${String(curProfile) === String(i) ? "selected" : ""}>${escapeHtml6(p.name || "\u041F\u0440\u043E\u0444\u0438\u043B\u044C " + i)}</option>`
+  const curConn = ms.mmTranslateConnProfileId || "";
+  const cm = SillyTavern.getContext().extensionSettings?.connectionManager;
+  const connProfiles = cm && Array.isArray(cm.profiles) ? cm.profiles : [];
+  const connOptions = connProfiles.map(
+    (p) => `<option value="${escapeHtml6(p.id)}" ${curConn === p.id ? "selected" : ""}>${escapeHtml6(p.name || p.id)}</option>`
   ).join("");
   const content = `
     <div class="stmb-box" style="padding:12px; text-align:left;">
       <h3 class="stmb-section-title">\u{1F310} \u041F\u0435\u0440\u0435\u0432\u043E\u0434 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0439</h3>
       <label style="display:block; margin:8px 0 4px;">\u041F\u0440\u043E\u043C\u043F\u0442 \u043F\u0435\u0440\u0435\u0432\u043E\u0434\u0430:</label>
       <textarea id="mm-tr-prompt" class="text_pole" rows="6" style="width:100%;">${escapeHtml6(curPrompt)}</textarea>
-      <label style="display:block; margin:12px 0 4px;">\u041F\u0440\u043E\u0444\u0438\u043B\u044C / \u043C\u043E\u0434\u0435\u043B\u044C:</label>
-      <select id="mm-tr-profile" class="text_pole" style="width:100%;">
-        <option value="" ${curProfile == null ? "selected" : ""}>\u041A\u0430\u043A \u043E\u0441\u043D\u043E\u0432\u043D\u043E\u0439 (\u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E)</option>
-        ${profileOptions}
+      <label style="display:block; margin:12px 0 4px;">\u041F\u0440\u043E\u0444\u0438\u043B\u044C \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F (SillyTavern):</label>
+      <select id="mm-tr-conn" class="text_pole" style="width:100%;">
+        <option value="" ${!curConn ? "selected" : ""}>\u0422\u0435\u043A\u0443\u0449\u0435\u0435 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435 (\u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E)</option>
+        ${connOptions}
       </select>
       <p style="opacity:.7; font-size:.85em; margin-top:8px;">\u0412 \u0418\u0418 \u0443\u0445\u043E\u0434\u0438\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0442\u0435\u043A\u0441\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u0438 \u044D\u0442\u043E\u0442 \u043F\u0440\u043E\u043C\u043F\u0442 \u2014 \u0431\u0435\u0437 \u043E\u0441\u0442\u0430\u043B\u044C\u043D\u043E\u0439 \u0438\u0441\u0442\u043E\u0440\u0438\u0438 \u0447\u0430\u0442\u0430.</p>
       <label style="display:flex; gap:8px; align-items:center; margin:10px 0 4px;">
@@ -23028,9 +23056,8 @@ async function mmOpenTranslateSettings() {
   const res = await popup.show();
   if (res !== POPUP_RESULT9.AFFIRMATIVE) return;
   const prompt = popup.dlg.querySelector("#mm-tr-prompt")?.value ?? "";
-  const profVal = popup.dlg.querySelector("#mm-tr-profile")?.value ?? "";
   ms.mmTranslatePrompt = prompt.trim() || MM_DEFAULT_TRANSLATE_PROMPT;
-  ms.mmTranslateProfileIndex = profVal === "" ? null : parseInt(profVal, 10);
+  ms.mmTranslateConnProfileId = popup.dlg.querySelector("#mm-tr-conn")?.value || "";
   ms.mmTranslateTempOverride = !!popup.dlg.querySelector("#mm-tr-temp-enabled")?.checked;
   const t2 = parseFloat(popup.dlg.querySelector("#mm-tr-temp")?.value);
   if (Number.isFinite(t2)) ms.mmTranslateTemp = Math.max(0, Math.min(2, t2));
@@ -23048,9 +23075,16 @@ function mmRollDie(sides = 20) {
   return 1 + Math.floor(mmRandom() * sides);
 }
 var mmLastRoll = null;
+var mmPendingBlock = null;
 function mmRollValue() {
   const n = mmRollDie(20);
   return { n, success: n >= 11 };
+}
+function mmRollInnerHtml(r, mode) {
+  if (mode === "successfail") {
+    return `<b class="mm-dice-${r.success ? "ok" : "fail"}">${r.success ? "\u0423\u0441\u043F\u0435\u0445" : "\u041F\u0440\u043E\u0432\u0430\u043B"}</b>`;
+  }
+  return `<span class="mm-dice-num">\u{1F3B2} ${r.n}</span>`;
 }
 function mmRenderRoll(mes, roll) {
   const textEl = mes.querySelector(".mes_text");
@@ -23105,13 +23139,31 @@ function mmOnGenerationStart(type, _options, dryRun) {
   } catch (e) {
     console.warn("[\u041C\u0435\u0445\u0430\u043D\u0438\u043A \u043C\u0430\u0448\u0438\u043D] \u0418\u043D\u044A\u0435\u043A\u0446\u0438\u044F \u0431\u0440\u043E\u0441\u043A\u0430 \u043D\u0435 \u0443\u0434\u0430\u043B\u0430\u0441\u044C:", e);
   }
+  const chat6 = document.getElementById("chat");
+  if (chat6) {
+    if (mmPendingBlock) mmPendingBlock.remove();
+    const block = document.createElement("div");
+    block.className = "mm-dice mm-dice-above";
+    block.innerHTML = mmRollInnerHtml(r, mode);
+    chat6.appendChild(block);
+    block.scrollIntoView({ block: "end" });
+    mmPendingBlock = block;
+  }
 }
 function mmShowRollOnMessage(mesId) {
   const ms = initializeSettings().moduleSettings;
-  if (!ms.mmDiceEnabled || !mmLastRoll) return;
+  if (!ms.mmDiceEnabled) return;
   const mes = document.querySelector(`#chat .mes[mesid="${mesId}"]`);
   if (!mes || mes.getAttribute("is_user") === "true") return;
-  mmRenderRoll(mes, mmLastRoll);
+  if (mmPendingBlock) {
+    mes.before(mmPendingBlock);
+    mmPendingBlock = null;
+  } else if (mmLastRoll) {
+    const block = document.createElement("div");
+    block.className = "mm-dice mm-dice-above";
+    block.innerHTML = mmRollInnerHtml(mmLastRoll, ms.mmDiceMode || "dice");
+    mes.before(block);
+  }
 }
 async function mmOpenDiceSettings() {
   const settings = initializeSettings();

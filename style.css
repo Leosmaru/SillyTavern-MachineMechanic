@@ -743,3 +743,10 @@
     margin: 0;
     cursor: pointer;
 }
+
+/* Механик машин — блок броска НАД сообщением (виден пока ИИ пишет) */
+.mm-dice-above {
+    display: flex;
+    width: fit-content;
+    margin: 8px auto 2px;
+}
