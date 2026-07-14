@@ -18245,6 +18245,9 @@ var defaultSettings = {
     mmTranslatePrompt: MM_DEFAULT_TRANSLATE_PROMPT,
     mmTranslateProfileIndex: null,
     // null = тот же профиль, что основной
+    mmTranslateTempOverride: false,
+    // галочка «своя температура»
+    mmTranslateTemp: 0.3,
     // Механик машин: бросок кубика
     mmDiceEnabled: false,
     mmDicePrompt: MM_DEFAULT_DICE_PROMPT,
@@ -22970,10 +22973,11 @@ async function mmTranslateText(text, profileIndexArg = null) {
 
 === \u0422\u0415\u041A\u0421\u0422 ===
 ${text}`;
+  const temperature = ms.mmTranslateTempOverride ? Number(ms.mmTranslateTemp) : conn.temperature;
   const res = await sendRawCompletionRequest({
     api: conn.api,
     model: conn.model,
-    temperature: conn.temperature,
+    temperature,
     endpoint: conn.endpoint,
     apiKey: conn.apiKey,
     reverseProxy: !!conn.reverseProxy,
@@ -23001,6 +23005,11 @@ async function mmOpenTranslateSettings() {
         ${profileOptions}
       </select>
       <p style="opacity:.7; font-size:.85em; margin-top:8px;">\u0412 \u0418\u0418 \u0443\u0445\u043E\u0434\u0438\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0442\u0435\u043A\u0441\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u0438 \u044D\u0442\u043E\u0442 \u043F\u0440\u043E\u043C\u043F\u0442 \u2014 \u0431\u0435\u0437 \u043E\u0441\u0442\u0430\u043B\u044C\u043D\u043E\u0439 \u0438\u0441\u0442\u043E\u0440\u0438\u0438 \u0447\u0430\u0442\u0430.</p>
+      <label style="display:flex; gap:8px; align-items:center; margin:10px 0 4px;">
+        <input type="checkbox" id="mm-tr-temp-enabled" ${ms.mmTranslateTempOverride ? "checked" : ""}/> \u0421\u0432\u043E\u044F \u0442\u0435\u043C\u043F\u0435\u0440\u0430\u0442\u0443\u0440\u0430
+      </label>
+      <input type="number" id="mm-tr-temp" class="text_pole" step="0.05" min="0" max="2" value="${ms.mmTranslateTemp ?? 0.3}" style="width:100%;"/>
+      <p style="opacity:.7; font-size:.85em; margin:4px 0 0;">\u0413\u0430\u043B\u043A\u0430 \u0432\u043A\u043B \u2014 \u043F\u0435\u0440\u0435\u0432\u043E\u0434 \u0431\u0435\u0440\u0451\u0442 \u044D\u0442\u0443 \u0442\u0435\u043C\u043F\u0435\u0440\u0430\u0442\u0443\u0440\u0443; \u0432\u044B\u043A\u043B \u2014 \u0442\u0435\u043C\u043F\u0435\u0440\u0430\u0442\u0443\u0440\u0443 \u0432\u044B\u0431\u0440\u0430\u043D\u043D\u043E\u0433\u043E \u043F\u0440\u043E\u0444\u0438\u043B\u044F.</p>
       <div class="stmb-button-row" style="margin-top:10px;">
         <div class="menu_button" id="mm-tr-reset">\u21A9 \u0421\u0431\u0440\u043E\u0441\u0438\u0442\u044C \u043F\u0440\u043E\u043C\u043F\u0442</div>
       </div>
@@ -23022,6 +23031,9 @@ async function mmOpenTranslateSettings() {
   const profVal = popup.dlg.querySelector("#mm-tr-profile")?.value ?? "";
   ms.mmTranslatePrompt = prompt.trim() || MM_DEFAULT_TRANSLATE_PROMPT;
   ms.mmTranslateProfileIndex = profVal === "" ? null : parseInt(profVal, 10);
+  ms.mmTranslateTempOverride = !!popup.dlg.querySelector("#mm-tr-temp-enabled")?.checked;
+  const t2 = parseFloat(popup.dlg.querySelector("#mm-tr-temp")?.value);
+  if (Number.isFinite(t2)) ms.mmTranslateTemp = Math.max(0, Math.min(2, t2));
   saveSettingsDebounced6();
   toastr.success("\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u043F\u0435\u0440\u0435\u0432\u043E\u0434\u0430 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u044B", "\u041C\u0435\u0445\u0430\u043D\u0438\u043A \u043C\u0430\u0448\u0438\u043D");
 }

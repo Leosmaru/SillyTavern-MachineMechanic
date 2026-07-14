@@ -384,6 +384,8 @@ const defaultSettings = {
     // Механик машин: перевод сообщений
     mmTranslatePrompt: MM_DEFAULT_TRANSLATE_PROMPT,
     mmTranslateProfileIndex: null, // null = тот же профиль, что основной
+    mmTranslateTempOverride: false, // галочка «своя температура»
+    mmTranslateTemp: 0.3,
     // Механик машин: бросок кубика
     mmDiceEnabled: false,
     mmDicePrompt: MM_DEFAULT_DICE_PROMPT,
@@ -6307,10 +6309,15 @@ export async function mmTranslateText(text, profileIndexArg = null) {
   const promptText = ms.mmTranslatePrompt || MM_DEFAULT_TRANSLATE_PROMPT;
   const fullPrompt = `${promptText}\n\n=== ТЕКСТ ===\n${text}`;
 
+  // Галочка «своя температура» — берём свою, иначе температуру профиля.
+  const temperature = ms.mmTranslateTempOverride
+    ? Number(ms.mmTranslateTemp)
+    : conn.temperature;
+
   const res = await sendRawCompletionRequest({
     api: conn.api,
     model: conn.model,
-    temperature: conn.temperature,
+    temperature,
     endpoint: conn.endpoint,
     apiKey: conn.apiKey,
     reverseProxy: !!conn.reverseProxy,
@@ -6347,6 +6354,11 @@ export async function mmOpenTranslateSettings() {
         ${profileOptions}
       </select>
       <p style="opacity:.7; font-size:.85em; margin-top:8px;">В ИИ уходит только текст сообщения и этот промпт — без остальной истории чата.</p>
+      <label style="display:flex; gap:8px; align-items:center; margin:10px 0 4px;">
+        <input type="checkbox" id="mm-tr-temp-enabled" ${ms.mmTranslateTempOverride ? "checked" : ""}/> Своя температура
+      </label>
+      <input type="number" id="mm-tr-temp" class="text_pole" step="0.05" min="0" max="2" value="${ms.mmTranslateTemp ?? 0.3}" style="width:100%;"/>
+      <p style="opacity:.7; font-size:.85em; margin:4px 0 0;">Галка вкл — перевод берёт эту температуру; выкл — температуру выбранного профиля.</p>
       <div class="stmb-button-row" style="margin-top:10px;">
         <div class="menu_button" id="mm-tr-reset">↩ Сбросить промпт</div>
       </div>
@@ -6372,6 +6384,9 @@ export async function mmOpenTranslateSettings() {
   const profVal = popup.dlg.querySelector("#mm-tr-profile")?.value ?? "";
   ms.mmTranslatePrompt = prompt.trim() || MM_DEFAULT_TRANSLATE_PROMPT;
   ms.mmTranslateProfileIndex = profVal === "" ? null : parseInt(profVal, 10);
+  ms.mmTranslateTempOverride = !!popup.dlg.querySelector("#mm-tr-temp-enabled")?.checked;
+  const t = parseFloat(popup.dlg.querySelector("#mm-tr-temp")?.value);
+  if (Number.isFinite(t)) ms.mmTranslateTemp = Math.max(0, Math.min(2, t));
   saveSettingsDebounced();
   toastr.success("Настройки перевода сохранены", "Механик машин");
 }
