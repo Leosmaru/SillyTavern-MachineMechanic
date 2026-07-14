@@ -353,7 +353,7 @@ const MM_DEFAULT_TRANSLATE_PROMPT =
 
 // Механик машин: промпт поведения ИИ на бросок кубика (редактируется в настройках).
 const MM_DEFAULT_DICE_PROMPT =
-  "Действие проверяется броском d20: 11 и выше — успех, меньше — провал. При успехе действие удаётся; при провале — осложнение или неудача. Вплети исход в описание естественно, не называя число.";
+  "The character's action is resolved by a d20 roll: 11 or higher is a success, lower is a failure. On a success the action works out; on a failure introduce a complication or setback. Weave the outcome naturally into the narration without stating the number.";
 
 const defaultSettings = {
   moduleSettings: {
