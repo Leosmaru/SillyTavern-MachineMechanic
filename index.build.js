@@ -23045,8 +23045,11 @@ async function mmOpenTranslateSettings() {
   const popup = new Popup9(content, POPUP_TYPE9.TEXT, "", {
     okButton: "\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C",
     cancelButton: "\u041E\u0442\u043C\u0435\u043D\u0430",
-    wide: true
+    wide: true,
+    large: true,
+    allowVerticalScrolling: true
   });
+  markStmbPopup(popup);
   popup.dlg.addEventListener("click", (e) => {
     if (e.target && e.target.id === "mm-tr-reset") {
       const ta = popup.dlg.querySelector("#mm-tr-prompt");
@@ -23191,8 +23194,11 @@ async function mmOpenDiceSettings() {
   const popup = new Popup9(content, POPUP_TYPE9.TEXT, "", {
     okButton: "\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C",
     cancelButton: "\u041E\u0442\u043C\u0435\u043D\u0430",
-    wide: true
+    wide: true,
+    large: true,
+    allowVerticalScrolling: true
   });
+  markStmbPopup(popup);
   popup.dlg.addEventListener("click", (e) => {
     if (e.target && e.target.id === "mm-dice-reset") {
       const ta = popup.dlg.querySelector("#mm-dice-prompt");

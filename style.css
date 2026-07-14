@@ -750,3 +750,32 @@
     width: fit-content;
     margin: 8px auto 2px;
 }
+
+/* ============================================================
+   Механик машин — просторные окна редактирования промптов
+   (удобнее на телефоне)
+   ============================================================ */
+/* Поля промптов — выше и с ручным ресайзом */
+.stmb-popup textarea.text_pole,
+#mm-tr-prompt,
+#mm-dice-prompt {
+    min-height: 40vh;
+    resize: vertical;
+    line-height: 1.4;
+}
+
+/* На телефоне — окна шире и поля ещё выше */
+@media (max-width: 800px) {
+    .popup.stmb-popup {
+        width: 96vw !important;
+        max-width: 96vw !important;
+    }
+    .popup.stmb-popup .popup-content {
+        max-height: 80vh;
+    }
+    .stmb-popup textarea.text_pole,
+    #mm-tr-prompt,
+    #mm-dice-prompt {
+        min-height: 48vh;
+    }
+}

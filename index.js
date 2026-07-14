@@ -6399,7 +6399,10 @@ export async function mmOpenTranslateSettings() {
     okButton: "Сохранить",
     cancelButton: "Отмена",
     wide: true,
+    large: true,
+    allowVerticalScrolling: true,
   });
+  markStmbPopup(popup);
 
   popup.dlg.addEventListener("click", (e) => {
     if (e.target && e.target.id === "mm-tr-reset") {
@@ -6566,7 +6569,10 @@ export async function mmOpenDiceSettings() {
     okButton: "Сохранить",
     cancelButton: "Отмена",
     wide: true,
+    large: true,
+    allowVerticalScrolling: true,
   });
+  markStmbPopup(popup);
   popup.dlg.addEventListener("click", (e) => {
     if (e.target && e.target.id === "mm-dice-reset") {
       const ta = popup.dlg.querySelector("#mm-dice-prompt");
