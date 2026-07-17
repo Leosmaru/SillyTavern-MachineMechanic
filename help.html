@@ -595,9 +595,9 @@
       <div class="table-wrap"><table>
         <thead><tr><th>Пресет</th><th>Что делает</th><th>Когда применять</th></tr></thead>
         <tbody>
-          <tr data-search="default подробный структура major beats character dynamics key exchanges outcome"><td class="ctrl">Default</td><td>Подробная структура: Premise · Major Beats · Character Dynamics · Key Exchanges · Outcome &amp; Continuity</td><td class="why">Важные сюжетные дуги, где нужна точность</td></tr>
-          <tr data-search="alternate компактный одна сводка"><td class="ctrl">Alternate</td><td>Одна компактная сводка без жёсткой рубрикации</td><td class="why">Баланс размера и детальности</td></tr>
-          <tr data-search="tiny агрессивное сжатие много записей"><td class="ctrl">Tiny</td><td>Агрессивное сжатие</td><td class="why">Когда записей очень много и важен объём</td></tr>
+          <tr data-search="default multi consolidation analysis мульти несколько дуг подробный структура major beats character dynamics key exchanges outcome"><td class="ctrl">Multi-Consolidation Analysis<br><span class="code">arc_default · дефолт</span></td><td>Подробная структура (Premise · Major Beats · Character Dynamics · Key Exchanges · Outcome &amp; Continuity). Может разбить исходники на <b>несколько</b> сводок-дуг</td><td class="why">Важные сюжетные дуги, где нужна точность</td></tr>
+          <tr data-search="alternate single consolidation analysis сингл одна сводка компактный"><td class="ctrl">Single Consolidation Analysis<br><span class="code">arc_alternate</span></td><td><b>Одна</b> компактная сводка без жёсткой рубрикации</td><td class="why">Баланс размера и детальности</td></tr>
+          <tr data-search="tiny агрессивное сжатие много записей компактный"><td class="ctrl">Tiny<br><span class="code">arc_tiny</span></td><td>Агрессивное сжатие множества мелких записей</td><td class="why">Когда записей очень много и важен объём</td></tr>
         </tbody>
       </table></div>
 
@@ -882,6 +882,39 @@
           <tr data-search="apply to selected profile применить к профилю stmb-pm-apply"><td class="ctrl">✅ Apply to Selected Profile</td><td>Применить выбранный пресет к активному профилю</td></tr>
         </tbody>
       </table></div>
+
+      <h3 class="sub">4.6 · Встроенные промпты памяти (Summary Prompt Manager)</h3>
+      <p class="sub-desc"><b>8 готовых промптов</b> для создания одного воспоминания из сцены (уровень memory, tier&nbsp;0). Выбираются в профиле или через <span class="btn-pill">🧩 Summary Prompt Manager</span>. Отличаются объёмом и стилем сводки — можно скопировать любой (Duplicate) и подправить под себя:</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Промпт</th><th>Что делает</th><th>Когда выбирать</th></tr></thead>
+        <tbody>
+          <tr data-search="summary саммари подробный по битам проза нарратив дефолт"><td class="ctrl">Summary</td><td>Подробный пересказ «по битам» связной прозой</td><td class="why">Универсальный дефолт, когда важны детали</td></tr>
+          <tr data-search="summarize буллеты список timeline story beats key interactions outcome"><td class="ctrl">Summarize</td><td>То же, но списком-буллетами (Timeline · Story Beats · Key Interactions · Notable Details · Outcome)</td><td class="why">Когда удобнее структурированный список</td></tr>
+          <tr data-search="synopsis синопсис длинный markdown заголовки максимум подробно"><td class="ctrl">Synopsis</td><td>Длинный, с markdown-заголовками (беты, взаимодействия, детали, итог)</td><td class="why">Насыщенные сцены, где нужно максимум</td></tr>
+          <tr data-search="sumup sum up сжато сжатые биты проза короче"><td class="ctrl">Sum Up</td><td>Сжатые сюжетные биты связной прозой</td><td class="why">Короче Summary, но всё ещё связно</td></tr>
+          <tr data-search="minimal минимал кратко 1-2 предложения экономия токенов"><td class="ctrl">Minimal</td><td>Кратко, 1–2 предложения</td><td class="why">Проходные сцены; экономия токенов</td></tr>
+          <tr data-search="northgate нортгейт художественное письмо creative writing литературный"><td class="ctrl">Northgate</td><td>Заточен под художественное письмо (автор — Northgate, ST Discord)</td><td class="why">Литературный / креативный стиль</td></tr>
+          <tr data-search="aelemar аелемар сюжетные точки память персонажей plot points"><td class="ctrl">Aelemar</td><td>Упор на сюжетные точки и память персонажей (автор — Aelemar, ST Discord)</td><td class="why">Когда важны факты и «кто что помнит»</td></tr>
+          <tr data-search="comprehensive комплексный полный синопсис улучшенные ключевые слова keywords"><td class="ctrl">Comprehensive</td><td>Как Synopsis + улучшенный подбор ключевых слов</td><td class="why">Максимальная полнота и хорошие ключи</td></tr>
+        </tbody>
+      </table></div>
+
+      <p class="sub-desc" style="margin-top:14px">Как выбрать под задачу — по-простому:</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Если тебе нужно…</th><th>Бери</th></tr></thead>
+        <tbody>
+          <tr data-search="не знаю что выбрать по умолчанию универсал дефолт"><td>Не знаешь, что взять — универсал</td><td class="ctrl">Summary</td></tr>
+          <tr data-search="важная поворотная ключевая сцена максимум деталей подробно"><td>Ключевая / поворотная сцена, нужен максимум деталей</td><td class="ctrl">Synopsis&nbsp;/&nbsp;Comprehensive</td></tr>
+          <tr data-search="экономия токенов проходная сцена коротко дёшево дешевле компактно"><td>Проходная сцена, экономия токенов (короче и дешевле)</td><td class="ctrl">Minimal&nbsp;/&nbsp;Sum&nbsp;Up</td></tr>
+          <tr data-search="структура список удобно читать буллеты рубрикация"><td>Удобнее читать структурой / списком</td><td class="ctrl">Summarize</td></tr>
+          <tr data-search="художественный стиль литературно креатив письмо"><td>Важен художественный стиль, литературность</td><td class="ctrl">Northgate</td></tr>
+          <tr data-search="факты сюжетные точки кто что помнит память персонажей континуити"><td>Важны факты, сюжетные точки, «кто что помнит»</td><td class="ctrl">Aelemar</td></tr>
+          <tr data-search="лучшие точные ключевые слова меньше шума ключи keywords"><td>Нужны самые точные ключевые слова (меньше шума в лорбуке)</td><td class="ctrl">Comprehensive</td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout"><span class="lbl">Правило объёма</span>Чем «тяжелее» промпт (Synopsis / Comprehensive), тем подробнее память — но больше токенов на генерацию и толще лорбук. Лёгкие (Minimal / Sum&nbsp;Up) — дёшево и компактно, но детали теряются. На практике: <b>проходные сцены — лёгкий промпт, ключевые/поворотные — тяжёлый.</b></div>
+
+      <div class="callout"><span class="lbl">А промпты консолидации?</span>Для <b>объединения</b> уже готовых воспоминаний — отдельный набор из трёх пресетов (Multi / Single / Tiny) в <span class="btn-pill">🧱 Consolidation Prompt Manager</span>. Они описаны в главе <a href="#cc">∑ Консолидация</a>.</div>
       <div class="callout warn"><span class="lbl">Внимание</span>Не меняйте инструкции «respond with JSON» в промптах — плагин по ним разбирает ответ ИИ.</div>
     </section>
 

@@ -10,6 +10,11 @@
 // ============================================================================
 
 import { mmOpenInline, mmTranslateText, mmOnGenerationStart, mmShowRollOnMessage } from "./index.build.js";
+import { initMemoryLabels } from "./memoryLabels.js";
+import { initChapterNav } from "./chapterNav.js";
+import { initMemoryTuning } from "./memoryTuning.js";
+import { initErrorHints } from "./errorHints.js";
+import { initStatBar } from "./statBar.js";
 
 const PANEL_ID = "mm-panel";
 const BUTTON_ID = "mm-wand-button";
@@ -107,6 +112,11 @@ function createToolbarButton() {
     } else {
         console.warn("[Механик машин] Панель ввода (#leftSendForm) не найдена.");
     }
+
+    // Иконки в #leftSendForm расставляются через CSS `order`, а не по DOM.
+    // У волшебной палочки order обычно 4 — ставим ключ сразу после неё.
+    const wandOrder = wand.length ? (parseInt(getComputedStyle(wand[0]).order, 10) || 4) : 4;
+    button.css("order", wandOrder + 1);
 }
 
 /** Убирает панель из чата. */
@@ -248,5 +258,40 @@ jQuery(() => {
         });
     }
 
-    console.log("[Механик машин] Готово: 🔧 интерфейс + 🌐 перевод + 🎲 кубик.");
+    // Бейджи «к какой записи лорбука относится сообщение» + понятная индикация стрелок.
+    try {
+        initMemoryLabels(ctx?.eventSource, ctx?.eventTypes);
+    } catch (e) {
+        console.warn("[Механик машин] Не удалось инициализировать бейджи воспоминаний:", e);
+    }
+
+    // Оглавление (навигация по главам-воспоминаниям).
+    try {
+        initChapterNav(ctx);
+    } catch (e) {
+        console.warn("[Механик машин] Не удалось инициализировать оглавление:", e);
+    }
+
+    // Режим памяти (галочка: чистые ключи ↔ смысловая активация/векторы).
+    try {
+        initMemoryTuning(ctx);
+    } catch (e) {
+        console.warn("[Механик машин] Не удалось инициализировать режим памяти:", e);
+    }
+
+    // Понятные ошибки генерации (тосты + верхняя панель задач).
+    try {
+        initErrorHints();
+    } catch (e) {
+        console.warn("[Механик машин] Не удалось инициализировать подсказки ошибок:", e);
+    }
+
+    // Универсальная полоска-стат (отдельная сущность, не трогает сайд-трекеры).
+    try {
+        initStatBar(ctx);
+    } catch (e) {
+        console.warn("[Механик машин] Не удалось инициализировать полоску-стат:", e);
+    }
+
+    console.log("[Механик машин] Готово: 🔧 интерфейс + 🌐 перевод + 🎲 кубик + 🏷️ бейджи + 📖 оглавление.");
 });
