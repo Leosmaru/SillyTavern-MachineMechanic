@@ -107,9 +107,11 @@ function escapeRe(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); 
 function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
 
 // [[Имя:N]] или [[Имя:N|короткая причина]] — причина необязательна (старый формат).
+// Разделитель терпимый: просим «|», но модель любит влепить тире, запятую или
+// двоеточие. Дешевле принять их все, чем терять причину из-за пунктуации.
 function markerRe(name, g) {
     return new RegExp(
-        "\\[\\[\\s*" + escapeRe(name) + "\\s*:\\s*(-?\\d+)\\s*(?:\\|([^\\]]*))?\\]\\]",
+        "\\[\\[\\s*" + escapeRe(name) + "\\s*:\\s*(-?\\d+)\\s*(?:[|,;:\\-–—]\\s*([^\\]]*))?\\]\\]",
         g ? "ig" : "i",
     );
 }
@@ -154,7 +156,8 @@ function buildInjectionText(c) {
     const list = activeBars(c);
     if (!list.length) return "";
 
-    const head = `[System instruction] At the very end of your reply, after the scene text, output one separate line for EACH stat listed below, strictly in the format [[Name:N|reason]] — where N is an integer within that stat's range, and reason is a very short phrase (max ${REASON_WORDS} words, in the language of your reply) naming the concrete cause of the change since its previous value. If a value did not change, name what keeps it there.`;
+    const ex = list[0];
+    const head = `[System instruction] At the very end of your reply, after the scene text, output one separate line for EACH stat listed below, strictly in the format [[Name:N|reason]] — where N is an integer within that stat's range, and reason is a very short phrase (max ${REASON_WORDS} words, in the language of your reply) naming the concrete cause of the change since its previous value. If a value did not change, name what keeps it there. The reason is MANDATORY: never output a bare [[Name:N]] without it. Example of the exact format required: [[${ex.name}:${Math.round((ex.min + ex.max) / 2)}|short cause of the change here]]`;
 
     const stats = list
         .map((b) => `- "${b.name}" (${b.min}-${b.max}): ${String(b.meaning || "").trim()}`)
@@ -618,7 +621,7 @@ function openModal() {
             if (!b.enabled || !Number.isFinite(raw)) return;
             const val = clamp(raw, b.min, b.max);
             pendingNext[b.name] = val;
-            items.push({ name: b.name, val, reason: "" });
+            items.push({ name: b.name, val, reason: "ручная накрутка" });
         });
         if (!items.length) { try { toastr?.info?.("Введи число хотя бы у одной включённой полоски.", "Полоска-стат"); } catch (e) {} return; }
         c.enabled = true; ov.querySelector("#mm-sb-enabled").checked = true; saveCfg();
