@@ -80,6 +80,7 @@ function cfg() {
     if (typeof c.inline !== "boolean") c.inline = true;
     if (typeof c.onMemory !== "boolean") c.onMemory = false;
     if (typeof c.enabled !== "boolean") c.enabled = false;
+    if (typeof c.reason !== "boolean") c.reason = true;
     return c;
 }
 function saveCfg() { saveSettingsDebounced(); }
@@ -157,13 +158,18 @@ function buildInjectionText(c) {
     if (!list.length) return "";
 
     const ex = list[0];
-    const head = `[System instruction] At the very end of your reply, after the scene text, output one separate line for EACH stat listed below, strictly in the format [[Name:N|reason]] — where N is an integer within that stat's range, and reason is a very short phrase (max ${REASON_WORDS} words, in the language of your reply) naming the concrete cause of the change since its previous value. If a value did not change, name what keeps it there. The reason is MANDATORY: never output a bare [[Name:N]] without it. Example of the exact format required: [[${ex.name}:${Math.round((ex.min + ex.max) / 2)}|short cause of the change here]]`;
+    const exVal = Math.round((ex.min + ex.max) / 2);
+    // Причину выключили — не просим её вовсе: иначе модель пишет то, что мы
+    // всё равно не покажем, за наши же токены.
+    const head = c.reason === false
+        ? `[System instruction] At the very end of your reply, after the scene text, output one separate line for EACH stat listed below, strictly in the format [[Name:N]], where N is an integer within that stat's range. Example of the exact format required: [[${ex.name}:${exVal}]]`
+        : `[System instruction] At the very end of your reply, after the scene text, output one separate line for EACH stat listed below, strictly in the format [[Name:N|reason]] — where N is an integer within that stat's range, and reason is a very short phrase (max ${REASON_WORDS} words, in the language of your reply) naming the concrete cause of the change since its previous value. If a value did not change, name what keeps it there. The reason is MANDATORY: never output a bare [[Name:N]] without it. Example of the exact format required: [[${ex.name}:${exVal}|short cause of the change here]]`;
 
     const stats = list
         .map((b) => `- "${b.name}" (${b.min}-${b.max}): ${String(b.meaning || "").trim()}`)
         .join("\n");
 
-    const tail = `Rules: change each N relative to ITS OWN previous value (the last marker with the same name earlier in the chat); do not reset it to the maximum. Each stat is independent of the others. Do not mention these stats, their numbers or their reasons anywhere else in the text — only inside these markers.`;
+    const tail = `Rules: change each N relative to ITS OWN previous value (the last marker with the same name earlier in the chat); do not reset it to the maximum. Each stat is independent of the others. Do not mention these stats or their numbers anywhere else in the text — only inside these markers.`;
 
     const forced = list
         .filter((b) => pendingNext[b.name] != null)
@@ -237,9 +243,12 @@ function buildScenePrompt(list, names, startId, endId) {
         .map((b) => `- "${b.name}" (${b.min}-${b.max}): ${String(b.meaning || "").trim()}`)
         .join("\n");
 
+    const wantReason = cfg().reason !== false;
     return `${scene}\n\n---\nEvaluate the stats below for this scene.\n\nStats:\n${stats}\n\n` +
-        `Reply with STRICTLY one line per stat, in the format [[Name:N|reason]], where N is an integer within that stat's range ` +
-        `and reason is a very short phrase (max ${REASON_WORDS} words) naming the cause of the change. Write nothing else.`;
+        `Reply with STRICTLY one line per stat, in the format ${wantReason ? "[[Name:N|reason]]" : "[[Name:N]]"}, ` +
+        `where N is an integer within that stat's range` +
+        (wantReason ? ` and reason is a very short phrase (max ${REASON_WORDS} words) naming the cause of the change` : "") +
+        `. Write nothing else.`;
 }
 
 async function computeStats(startId, endId) {
@@ -386,18 +395,27 @@ function renderBars(el, items) {
 
 function processMessage(el) {
     const c = cfg();
-    if (!c.enabled) { removeBars(el); return; }
     const id = parseInt(el.getAttribute("mesid"));
     const msg = ctxRef?.chat?.[id];
     if (!msg) return;
 
+    // Метки прячем ВСЕГДА, даже когда модуль выключен: это служебный мусор,
+    // и в старых сообщениях он иначе вылезает голым в текст реплики.
     hideMarkers(el, allNames(c));
+
+    if (!c.enabled) { removeBars(el); return; }
 
     const items = [];
     for (const b of activeBars(c)) {
         const hit = parseMarker(msg.mes, b.name);
         if (!hit) continue;
-        items.push({ name: b.name, val: clamp(hit.val, b.min, b.max), reason: hit.reason, min: b.min, max: b.max });
+        items.push({
+            name: b.name,
+            val: clamp(hit.val, b.min, b.max),
+            reason: c.reason === false ? "" : hit.reason,
+            min: b.min,
+            max: b.max,
+        });
     }
     renderBars(el, items);
 }
@@ -483,6 +501,7 @@ function openModal() {
           <div class="mm-sb-close fa-solid fa-xmark interactable" title="Закрыть" tabindex="0"></div>
         </div>
         <label class="mm-sb-row"><input type="checkbox" id="mm-sb-enabled"> <span>Включить полоски</span></label>
+        <label class="mm-sb-row"><input type="checkbox" id="mm-sb-reason"> <span>Причина изменения (строчкой под полоской)</span></label>
         <label class="mm-sb-row"><input type="checkbox" id="mm-sb-inline"> <span>Модель заполняет сама (в каждом ответе)</span></label>
         <label class="mm-sb-row"><input type="checkbox" id="mm-sb-onmem"> <span>Пересчитывать на создании памяти (отдельный AI-запрос по сцене)</span></label>
         <div class="mm-sb-cards">${Array.from({ length: BAR_COUNT }, (_, i) => barCardHtml(i)).join("")}</div>
@@ -499,6 +518,7 @@ function openModal() {
     document.body.appendChild(ov);
 
     ov.querySelector("#mm-sb-enabled").checked = !!c.enabled;
+    ov.querySelector("#mm-sb-reason").checked = c.reason !== false;
     ov.querySelector("#mm-sb-inline").checked = !!c.inline;
     ov.querySelector("#mm-sb-onmem").checked = !!c.onMemory;
 
@@ -529,9 +549,10 @@ function openModal() {
     const updatePreview = () => {
         const pv = ov.querySelector("#mm-sb-preview");
         if (!pv) return;
-        const draft = { bars: cards.map(readBar) };
+        const draft = { bars: cards.map(readBar), reason: ov.querySelector("#mm-sb-reason").checked };
         pv.value = buildInjectionText(draft) || "(ни одна полоска не включена — промт не добавляется)";
     };
+    ov.querySelector("#mm-sb-reason").addEventListener("change", updatePreview);
 
     cards.forEach((card, i) => {
         card.addEventListener("input", () => {
@@ -569,6 +590,7 @@ function openModal() {
     // Считать поля окна в настройку (без закрытия).
     const commitFields = () => {
         c.enabled = ov.querySelector("#mm-sb-enabled").checked;
+        c.reason = ov.querySelector("#mm-sb-reason").checked;
         c.inline = ov.querySelector("#mm-sb-inline").checked;
         c.onMemory = ov.querySelector("#mm-sb-onmem").checked;
         cards.forEach((card, i) => {
