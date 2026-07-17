@@ -24,6 +24,7 @@ let ctxRef = null;
 let obs = null;
 let obsTimer = null;
 let stylesInjected = false;
+let pendingNext = null; // «накрутка»: форс значения на следующий ответ (одноразово)
 
 // Готовые примеры (кнопки в попапе подставляют их в поля).
 const EXAMPLES = [
@@ -91,7 +92,10 @@ function colorFor(pct) {
 function buildInjectionText(c) {
     const head = `[System instruction] At the very end of your reply, on a separate line, output the current "${c.name}" value strictly in the format [[${c.name}:N]], where N is an integer from ${c.min} to ${c.max}.`;
     const tail = `Change N relative to its previous value (the last such marker earlier in the chat); do not reset it to the maximum. Do not mention this stat anywhere else in the text — only in this single marker.`;
-    return `${head} ${String(c.meaning || "").trim()} ${tail}`;
+    const override = pendingNext != null
+        ? ` For THIS reply only, set "${c.name}" to exactly ${pendingNext} (manual override); reflect this value in the scene, then continue normally afterward.`
+        : "";
+    return `${head} ${String(c.meaning || "").trim()} ${tail}${override}`;
 }
 
 function updateInjection() {
@@ -334,7 +338,12 @@ function openModal() {
         <textarea id="mm-sb-preview" class="text_pole" rows="5" readonly></textarea>
         <label class="mm-sb-row"><input type="checkbox" id="mm-sb-inline"> <span>Модель заполняет сама (в каждом ответе)</span></label>
         <label class="mm-sb-row"><input type="checkbox" id="mm-sb-onmem"> <span>Пересчитывать на создании памяти (отдельный AI-запрос по сцене)</span></label>
-        <div class="mm-sb-hint">Фиксированную часть промта (формат <code>[[Имя:N]]</code>, диапазон, «меняй от прошлого») модуль добавляет сам. Ты пишешь только смысл.</div>
+        <div class="mm-sb-next">
+          <label class="mm-sb-lbl" style="margin:0;flex:1">↯ Накрутить на следующий ответ:</label>
+          <input type="number" id="mm-sb-next" class="text_pole" style="width:74px" placeholder="напр. 30">
+          <div class="menu_button mm-sb-next-apply">Применить</div>
+        </div>
+        <div class="mm-sb-hint">Фиксированную часть промта (формат <code>[[Имя:N]]</code>, диапазон, «меняй от прошлого») модуль добавляет сам. Ты пишешь только смысл. «Накрутка» разово задаёт значение на следующий ответ ИИ.</div>
         <div class="mm-sb-actions">
           <div class="menu_button mm-sb-recompute" title="Посчитать стат по последней сцене прямо сейчас">↻ Пересчитать сейчас</div>
           <div class="menu_button mm-sb-save">Сохранить</div>
@@ -410,9 +419,10 @@ function openModal() {
             btn.textContent = old;
         }
     });
-    ov.querySelector(".mm-sb-save").addEventListener("click", () => {
+    // Считать поля окна в настройку (без закрытия).
+    const commitFields = () => {
         c.enabled = ov.querySelector("#mm-sb-enabled").checked;
-        c.name = (ov.querySelector("#mm-sb-name").value || "HP").trim() || "HP";
+        c.name = (ov.querySelector("#mm-sb-name").value || "Здоровье").trim() || "Здоровье";
         c.meaning = ov.querySelector("#mm-sb-meaning").value || "";
         c.min = parseInt(ov.querySelector("#mm-sb-min").value, 10); if (!Number.isFinite(c.min)) c.min = 0;
         c.max = parseInt(ov.querySelector("#mm-sb-max").value, 10); if (!Number.isFinite(c.max)) c.max = 100;
@@ -420,10 +430,29 @@ function openModal() {
         c.inline = ov.querySelector("#mm-sb-inline").checked;
         c.onMemory = ov.querySelector("#mm-sb-onmem").checked;
         saveCfg();
+    };
+
+    ov.querySelector(".mm-sb-save").addEventListener("click", () => {
+        commitFields();
         updateInjection();
         refreshAll();
         close();
         try { toastr?.success?.(c.enabled ? `Полоска «${c.name}» включена.` : "Полоска выключена.", "Полоска-стат"); } catch (e) {}
+    });
+
+    // Накрутка: разово задать значение на следующий ответ ИИ.
+    ov.querySelector(".mm-sb-next-apply").addEventListener("click", () => {
+        commitFields();
+        const raw = parseInt(ov.querySelector("#mm-sb-next").value, 10);
+        if (!Number.isFinite(raw)) { try { toastr?.info?.("Введи число.", "Полоска-стат"); } catch (e) {} return; }
+        const val = clamp(raw, c.min, c.max);
+        pendingNext = val;
+        c.enabled = true; ov.querySelector("#mm-sb-enabled").checked = true; saveCfg();
+        updateInjection();
+        // мгновенно показать на последнем сообщении
+        const lastId = (ctxRef?.chat?.length || 0) - 1;
+        if (lastId >= 0) { setMarkerOnMessage(lastId, c.name, val); refreshAll(); }
+        try { toastr?.success?.(`Следующий ответ: ${c.name} = ${val}`, "Полоска-стат"); } catch (e) {}
     });
 }
 
@@ -476,6 +505,8 @@ function injectStyles() {
       #mm-statbar-modal .mm-sb-lbl { font-size:.82em; opacity:.75; margin-top:4px; }
       #mm-statbar-modal .mm-sb-row { display:flex; align-items:center; gap:8px; cursor:pointer; margin:2px 0; }
       #mm-statbar-modal .mm-sb-range { display:grid; grid-template-columns:auto 1fr auto 1fr; align-items:center; gap:6px; }
+      #mm-statbar-modal .mm-sb-next { display:flex; align-items:center; gap:6px; margin:2px 0; }
+      #mm-statbar-modal .mm-sb-next .menu_button { width:auto; white-space:nowrap; }
       #mm-statbar-modal textarea, #mm-statbar-modal input[type="text"], #mm-statbar-modal input[type="number"] { width:100%; box-sizing:border-box; }
       #mm-statbar-modal .mm-sb-examples { font-size:.8em; opacity:.85; margin:2px 0; display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
       #mm-statbar-modal .mm-sb-ex {
@@ -517,6 +548,13 @@ export function initStatBar(ctx) {
         ctxRef.eventSource.on(ctxRef.eventTypes.WORLDINFO_UPDATED, () => {
             clearTimeout(wiTimer);
             wiTimer = setTimeout(() => { runOnMemory().catch(() => {}); }, 500);
+        });
+    }
+
+    // «Накрутка» одноразовая: после ответа ИИ сбрасываем форс-значение.
+    if (ctxRef?.eventSource && ctxRef?.eventTypes?.MESSAGE_RECEIVED) {
+        ctxRef.eventSource.on(ctxRef.eventTypes.MESSAGE_RECEIVED, () => {
+            if (pendingNext != null) { pendingNext = null; updateInjection(); }
         });
     }
 }
