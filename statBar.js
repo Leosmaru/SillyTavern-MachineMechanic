@@ -18,6 +18,9 @@
 import { saveSettingsDebounced, chat_metadata } from "../../../../script.js";
 import { extension_settings } from "../../../extensions.js";
 import { METADATA_KEY, world_names, loadWorldInfo } from "../../../world-info.js";
+// Перевод причин — берём готовый движок плагина (тот же, что у кнопки 🌐 на
+// сообщениях), чтобы уважать выбранный профиль подключения и промт перевода.
+import { mmTranslateText } from "./index.build.js";
 
 const MODULE = "Механик машин/полоска-стат";
 const BTN_ID = "mm-statbar-button";
@@ -161,15 +164,18 @@ function buildInjectionText(c) {
     const exVal = Math.round((ex.min + ex.max) / 2);
     // Причину выключили — не просим её вовсе: иначе модель пишет то, что мы
     // всё равно не покажем, за наши же токены.
+    // Количество строк называем числом и повторяем в хвосте: модели охотно
+    // пишут первую метку и «забывают» остальные, если счёт не задан явно.
+    const count = `exactly ${list.length} line${list.length > 1 ? "s" : ""} (one per stat, ALL of them, even if a value did not change)`;
     const head = c.reason === false
-        ? `[System instruction] At the very end of your reply, after the scene text, output one separate line for EACH stat listed below, strictly in the format [[Name:N]], where N is an integer within that stat's range. Example of the exact format required: [[${ex.name}:${exVal}]]`
-        : `[System instruction] At the very end of your reply, after the scene text, output one separate line for EACH stat listed below, strictly in the format [[Name:N|reason]] — where N is an integer within that stat's range, and reason is a very short phrase (max ${REASON_WORDS} words, in the language of your reply) naming the concrete cause of the change since its previous value. If a value did not change, name what keeps it there. The reason is MANDATORY: never output a bare [[Name:N]] without it. Example of the exact format required: [[${ex.name}:${exVal}|short cause of the change here]]`;
+        ? `[System instruction] At the very end of your reply, after the scene text, output ${count}, strictly in the format [[Name:N]], where N is an integer within that stat's range. Example of the exact format required: [[${ex.name}:${exVal}]]`
+        : `[System instruction] At the very end of your reply, after the scene text, output ${count}, strictly in the format [[Name:N|reason]] — where N is an integer within that stat's range, and reason is a very short phrase (max ${REASON_WORDS} words, in the language of your reply) naming the concrete cause of the change since its previous value. If a value did not change, name what keeps it there. The reason is MANDATORY: never output a bare [[Name:N]] without it. Example of the exact format required: [[${ex.name}:${exVal}|short cause of the change here]]`;
 
     const stats = list
         .map((b) => `- "${b.name}" (${b.min}-${b.max}): ${String(b.meaning || "").trim()}`)
         .join("\n");
 
-    const tail = `Rules: change each N relative to ITS OWN previous value (the last marker with the same name earlier in the chat); do not reset it to the maximum. Each stat is independent of the others. Do not mention these stats or their numbers anywhere else in the text — only inside these markers.`;
+    const tail = `Rules: output all ${list.length} marker${list.length > 1 ? "s" : ""} every time — a missing one is an error. If a stat has no marker earlier in the chat, this is its first one: pick a sensible starting value. Otherwise change each N relative to ITS OWN previous value (the last marker with the same name earlier in the chat); do not reset it to the maximum. Each stat is independent of the others. Do not mention these stats or their numbers anywhere else in the text — only inside these markers.`;
 
     const forced = list
         .filter((b) => pendingNext[b.name] != null)
@@ -349,16 +355,21 @@ function renderBars(el, items) {
     if (!wrap) {
         wrap = document.createElement("div");
         wrap.className = "mm-statbars";
+        wrap.innerHTML =
+            `<div class="mm-statbars-list"></div>` +
+            `<div class="mm-statbars-tr fa-solid fa-globe interactable" title="Перевести причины" tabindex="0"></div>`;
+        wrap.querySelector(".mm-statbars-tr").addEventListener("click", () => translateReasons(wrap));
         const chip = block.querySelector(".stmb_mem_label");
         const text = block.querySelector(".mes_text");
         if (chip && chip.parentElement === block) chip.after(wrap);
         else if (text) block.insertBefore(wrap, text);
         else block.appendChild(wrap);
     }
+    const list = wrap.querySelector(".mm-statbars-list");
 
     // Ищем по dataset, а не селектором: имя стата — произвольный текст.
     const existing = new Map();
-    for (const child of [...wrap.children]) existing.set(child.dataset.stat, child);
+    for (const child of [...list.children]) existing.set(child.dataset.stat, child);
 
     for (const it of items) {
         let bar = existing.get(it.name);
@@ -375,7 +386,7 @@ function renderBars(el, items) {
                 `<div class="mm-statbar-reason"></div>`;
         }
         existing.delete(it.name);
-        wrap.appendChild(bar); // перенос уже существующего узла = порядок как в настройке
+        list.appendChild(bar); // перенос уже существующего узла = порядок как в настройке
 
         const range = (it.max - it.min) || 1;
         const pct = Math.round(((it.val - it.min) / range) * 100);
@@ -384,13 +395,68 @@ function renderBars(el, items) {
         const fill = bar.querySelector(".mm-statbar-fill");
         fill.style.width = clamp(pct, 0, 100) + "%";
         fill.style.background = colorFor(pct);
+
+        // Оригинал держим в dataset: наблюдатель перерисовывает полоски часто,
+        // и без этого перевод стирался бы через долю секунды после клика.
+        bar.dataset.reason = it.reason || "";
+        const shown = (bar.dataset.reasonSrc === it.reason && bar.dataset.reasonTr)
+            ? bar.dataset.reasonTr
+            : it.reason;
         const rs = bar.querySelector(".mm-statbar-reason");
-        rs.textContent = it.reason || "";
-        rs.style.display = it.reason ? "" : "none";
+        rs.textContent = shown || "";
+        rs.style.display = shown ? "" : "none";
         bar.title = `${it.name}: ${it.val} / ${it.max}${it.reason ? ` — ${it.reason}` : ""}`;
     }
     // Полоски, которых в этом сообщении больше нет (выключили / переименовали).
     for (const stale of existing.values()) stale.remove();
+
+    // Кнопка нужна, только если есть что переводить.
+    const any = items.some((i) => i.reason);
+    wrap.querySelector(".mm-statbars-tr").style.display = any ? "" : "none";
+}
+
+// Перевод причин: каждая — своим коротким запросом (причины по 8 слов, зато
+// сопоставление 1:1 гарантировано). Повторный клик возвращает оригинал.
+async function translateReasons(wrap) {
+    const btn = wrap.querySelector(".mm-statbars-tr");
+    if (btn.dataset.busy) return;
+    const bars = [...wrap.querySelectorAll(".mm-statbar")].filter((b) => b.dataset.reason);
+    if (!bars.length) return;
+
+    if (bars.some((b) => b.dataset.reasonTr)) { // переключатель — вернуть как было
+        for (const b of bars) {
+            delete b.dataset.reasonTr;
+            delete b.dataset.reasonSrc;
+            b.querySelector(".mm-statbar-reason").textContent = b.dataset.reason;
+        }
+        btn.classList.remove("mm-statbars-tr-on");
+        return;
+    }
+
+    btn.dataset.busy = "1";
+    btn.classList.add("mm-statbars-tr-wait");
+    try {
+        const out = await Promise.all(
+            bars.map((b) => mmTranslateText(b.dataset.reason).catch((e) => {
+                console.warn(`[${MODULE}] перевод причины:`, e);
+                return null;
+            })),
+        );
+        let ok = 0;
+        bars.forEach((b, i) => {
+            const tr = String(out[i] || "").replace(/\s+/g, " ").trim();
+            if (!tr) return;
+            b.dataset.reasonSrc = b.dataset.reason;
+            b.dataset.reasonTr = tr;
+            b.querySelector(".mm-statbar-reason").textContent = tr;
+            ok++;
+        });
+        if (ok) btn.classList.add("mm-statbars-tr-on");
+        else try { toastr?.error?.("Не удалось перевести причины.", "Полоска-стат"); } catch (e) {}
+    } finally {
+        delete btn.dataset.busy;
+        btn.classList.remove("mm-statbars-tr-wait");
+    }
 }
 
 function processMessage(el) {
@@ -663,7 +729,16 @@ function injectStyles() {
     const s = document.createElement("style");
     s.id = "mm-statbar-style";
     s.textContent = `
-      .mm-statbars { display: flex; flex-direction: column; gap: 4px; width: fit-content; max-width: 100%; margin: 3px 0 6px; }
+      .mm-statbars { display: flex; align-items: flex-start; gap: 6px; width: fit-content; max-width: 100%; margin: 3px 0 6px; }
+      .mm-statbars-list { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+      .mm-statbars-tr {
+        cursor: pointer; opacity: .45; font-size: .78em; padding: 4px 5px;
+        border-radius: 6px; align-self: center; flex: none;
+      }
+      .mm-statbars-tr:hover { opacity: 1; background: color-mix(in srgb, var(--SmartThemeQuoteColor) 20%, transparent); }
+      .mm-statbars-tr-on { opacity: 1; color: var(--SmartThemeQuoteColor); }
+      .mm-statbars-tr-wait { opacity: 1; animation: mm-statbars-spin 1s linear infinite; }
+      @keyframes mm-statbars-spin { to { transform: rotate(360deg); } }
       .mm-statbar {
         display: flex; flex-direction: column; gap: 1px;
         padding: 3px 8px;
