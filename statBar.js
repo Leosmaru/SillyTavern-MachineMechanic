@@ -18,9 +18,6 @@
 import { saveSettingsDebounced, chat_metadata } from "../../../../script.js";
 import { extension_settings } from "../../../extensions.js";
 import { METADATA_KEY, world_names, loadWorldInfo } from "../../../world-info.js";
-// Перевод причин — берём готовый движок плагина (тот же, что у кнопки 🌐 на
-// сообщениях), чтобы уважать выбранный профиль подключения и промт перевода.
-import { mmTranslateText } from "./index.build.js";
 
 const MODULE = "Механик машин/полоска-стат";
 const BTN_ID = "mm-statbar-button";
@@ -415,6 +412,15 @@ function renderBars(el, items) {
     wrap.querySelector(".mm-statbars-tr").style.display = any ? "" : "none";
 }
 
+// Перевод — ВСТРОЕННЫМ переводчиком SillyTavern, а не нейронкой: провайдер
+// (Яндекс / Google / DeepL) и язык берутся из настроек самой Таверны, отдельно
+// настраивать нечего. Импорт ленивый: модуль нужен только по клику, и если
+// переводчик выключен, полоски всё равно работают.
+async function translateText(text) {
+    const mod = await import("../../translate/index.js");
+    return await mod.translate(text, null); // lang = null → целевой язык из настроек ST
+}
+
 // Перевод причин: каждая — своим коротким запросом (причины по 8 слов, зато
 // сопоставление 1:1 гарантировано). Повторный клик возвращает оригинал.
 async function translateReasons(wrap) {
@@ -437,7 +443,7 @@ async function translateReasons(wrap) {
     btn.classList.add("mm-statbars-tr-wait");
     try {
         const out = await Promise.all(
-            bars.map((b) => mmTranslateText(b.dataset.reason).catch((e) => {
+            bars.map((b) => translateText(b.dataset.reason).catch((e) => {
                 console.warn(`[${MODULE}] перевод причины:`, e);
                 return null;
             })),
