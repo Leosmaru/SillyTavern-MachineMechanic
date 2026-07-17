@@ -287,6 +287,56 @@ async function computeStats(startId, endId) {
     return out;
 }
 
+// ----------------------------------------------------------------------------
+// Придумать название стата по описанию (отдельный запрос к модели)
+// ----------------------------------------------------------------------------
+// Имя — это КЛЮЧ метки [[Имя:N]] и часть промта, поэтому чистим ответ жёстко:
+// скобки, двоеточие и труба сломали бы разбор, а болтовню вокруг имени модели
+// вставляют регулярно.
+function sanitizeName(s) {
+    let t = String(s || "").split("\n").find((l) => l.trim()) || "";
+    t = t.replace(/^\s*[-–—*•>\d.)\]]+\s+/, "");            // маркер списка / нумерация
+    t = t.replace(/^\s*(name|stat|answer|title)\s*[:\-—]\s*/i, "");
+    t = t.replace(/[[\]|:;"'`*_#()]/g, " ").replace(/[.,!?]+\s*$/g, "");
+    t = t.replace(/\s+/g, " ").trim();
+    const w = t.split(" ").filter(Boolean);
+    if (w.length > 3) t = w.slice(0, 3).join(" ");
+    return t.slice(0, 24);
+}
+
+async function generateName(meaning) {
+    const gen = ctxRef?.generateRaw;
+    if (typeof gen !== "function") {
+        try { toastr?.warning?.("generateRaw недоступен в этой версии SillyTavern.", "Полоска-стат"); } catch (e) {}
+        return null;
+    }
+    const text = String(meaning || "").trim();
+    if (!text) {
+        try { toastr?.info?.("Сначала напиши описание стата.", "Полоска-стат"); } catch (e) {}
+        return null;
+    }
+    // Просим ИМЕННО английское: имя уходит в промт, и модель, не знающая
+    // русского, на «Здоровье» спотыкается. Для глаз есть кнопка перевода.
+    const prompt = `Below is a description of a stat tracked for a roleplay character.\n\n` +
+        `Description:\n${text}\n\n---\n` +
+        `Give this stat a short name in ENGLISH: one or two words, plain nouns, no quotes, ` +
+        `no punctuation, no explanation. Reply with the name and nothing else.`;
+    let resp;
+    try {
+        resp = await gen({ prompt, responseLength: 16, trimNames: true });
+    } catch (e) {
+        console.warn(`[${MODULE}] generateName:`, e);
+        try { toastr?.error?.("Не удалось придумать название (ошибка запроса).", "Полоска-стат"); } catch (er) {}
+        return null;
+    }
+    const name = sanitizeName(resp);
+    if (!name) {
+        try { toastr?.error?.("Модель вернула пустое название.", "Полоска-стат"); } catch (e) {}
+        return null;
+    }
+    return name;
+}
+
 // Проставить значения метками в конкретное сообщение (переиспользует рендер).
 function setMarkersOnMessage(id, items) {
     const msg = ctxRef?.chat?.[id];
@@ -354,7 +404,7 @@ function renderBars(el, items) {
         wrap.className = "mm-statbars";
         wrap.innerHTML =
             `<div class="mm-statbars-list"></div>` +
-            `<div class="mm-statbars-tr fa-solid fa-globe interactable" title="Перевести причины" tabindex="0"></div>`;
+            `<div class="mm-statbars-tr fa-solid fa-globe interactable" title="Перевести названия и причины" tabindex="0"></div>`;
         wrap.querySelector(".mm-statbars-tr").addEventListener("click", () => translateReasons(wrap));
         const chip = block.querySelector(".stmb_mem_label");
         const text = block.querySelector(".mes_text");
@@ -387,52 +437,65 @@ function renderBars(el, items) {
 
         const range = (it.max - it.min) || 1;
         const pct = Math.round(((it.val - it.min) / range) * 100);
-        bar.querySelector(".mm-statbar-name").textContent = it.name;
         bar.querySelector(".mm-statbar-val").textContent = `${it.val}`;
         const fill = bar.querySelector(".mm-statbar-fill");
         fill.style.width = clamp(pct, 0, 100) + "%";
         fill.style.background = colorFor(pct);
 
-        // Оригинал держим в dataset: наблюдатель перерисовывает полоски часто,
+        // Оригиналы держим в dataset: наблюдатель перерисовывает полоски часто,
         // и без этого перевод стирался бы через долю секунды после клика.
+        // Перевод показываем, только если исходники с тех пор не изменились.
+        bar.dataset.name = it.name;
         bar.dataset.reason = it.reason || "";
-        const shown = (bar.dataset.reasonSrc === it.reason && bar.dataset.reasonTr)
-            ? bar.dataset.reasonTr
-            : it.reason;
+        const fresh = bar.dataset.srcName === it.name && bar.dataset.srcReason === (it.reason || "");
+        const nameShown = fresh && bar.dataset.trName ? bar.dataset.trName : it.name;
+        const reasonShown = fresh && bar.dataset.trReason ? bar.dataset.trReason : it.reason;
+
+        bar.querySelector(".mm-statbar-name").textContent = nameShown;
         const rs = bar.querySelector(".mm-statbar-reason");
-        rs.textContent = shown || "";
-        rs.style.display = shown ? "" : "none";
+        rs.textContent = reasonShown || "";
+        rs.style.display = reasonShown ? "" : "none";
         bar.title = `${it.name}: ${it.val} / ${it.max}${it.reason ? ` — ${it.reason}` : ""}`;
     }
     // Полоски, которых в этом сообщении больше нет (выключили / переименовали).
     for (const stale of existing.values()) stale.remove();
-
-    // Кнопка нужна, только если есть что переводить.
-    const any = items.some((i) => i.reason);
-    wrap.querySelector(".mm-statbars-tr").style.display = any ? "" : "none";
 }
 
 // Перевод — ВСТРОЕННЫМ переводчиком SillyTavern, а не нейронкой: провайдер
 // (Яндекс / Google / DeepL) и язык берутся из настроек самой Таверны, отдельно
 // настраивать нечего. Импорт ленивый: модуль нужен только по клику, и если
 // переводчик выключен, полоски всё равно работают.
+// Кэш общий на чат: названия повторяются в каждом сообщении, гонять их через
+// API по кругу незачем.
+const trCache = new Map();
 async function translateText(text) {
+    const src = String(text || "").trim();
+    if (!src) return "";
+    if (trCache.has(src)) return trCache.get(src);
     const mod = await import("../../translate/index.js");
-    return await mod.translate(text, null); // lang = null → целевой язык из настроек ST
+    const out = await mod.translate(src, null); // lang = null → целевой язык из настроек ST
+    const clean = String(out || "").replace(/\s+/g, " ").trim();
+    if (clean) trCache.set(src, clean);
+    return clean;
 }
 
-// Перевод причин: каждая — своим коротким запросом (причины по 8 слов, зато
-// сопоставление 1:1 гарантировано). Повторный клик возвращает оригинал.
+// Перевод блока: и название стата, и причина. Название обычно английское
+// (кнопка «придумать» генерит на английском — чтобы промт понимала любая
+// модель), так что без перевода имени кнопка была бы полумерой.
+// Повторный клик возвращает оригинал.
 async function translateReasons(wrap) {
     const btn = wrap.querySelector(".mm-statbars-tr");
     if (btn.dataset.busy) return;
-    const bars = [...wrap.querySelectorAll(".mm-statbar")].filter((b) => b.dataset.reason);
+    const bars = [...wrap.querySelectorAll(".mm-statbar")];
     if (!bars.length) return;
 
-    if (bars.some((b) => b.dataset.reasonTr)) { // переключатель — вернуть как было
+    if (bars.some((b) => b.dataset.trName || b.dataset.trReason)) { // переключатель
         for (const b of bars) {
-            delete b.dataset.reasonTr;
-            delete b.dataset.reasonSrc;
+            delete b.dataset.trName;
+            delete b.dataset.trReason;
+            delete b.dataset.srcName;
+            delete b.dataset.srcReason;
+            b.querySelector(".mm-statbar-name").textContent = b.dataset.name;
             b.querySelector(".mm-statbar-reason").textContent = b.dataset.reason;
         }
         btn.classList.remove("mm-statbars-tr-on");
@@ -442,23 +505,28 @@ async function translateReasons(wrap) {
     btn.dataset.busy = "1";
     btn.classList.add("mm-statbars-tr-wait");
     try {
+        const grab = (t) => translateText(t).catch((e) => {
+            console.warn(`[${MODULE}] перевод:`, e);
+            return "";
+        });
         const out = await Promise.all(
-            bars.map((b) => translateText(b.dataset.reason).catch((e) => {
-                console.warn(`[${MODULE}] перевод причины:`, e);
-                return null;
+            bars.map(async (b) => ({
+                name: await grab(b.dataset.name),
+                reason: await grab(b.dataset.reason),
             })),
         );
         let ok = 0;
         bars.forEach((b, i) => {
-            const tr = String(out[i] || "").replace(/\s+/g, " ").trim();
-            if (!tr) return;
-            b.dataset.reasonSrc = b.dataset.reason;
-            b.dataset.reasonTr = tr;
-            b.querySelector(".mm-statbar-reason").textContent = tr;
+            const { name, reason } = out[i];
+            if (!name && !reason) return;
+            b.dataset.srcName = b.dataset.name;
+            b.dataset.srcReason = b.dataset.reason;
+            if (name) { b.dataset.trName = name; b.querySelector(".mm-statbar-name").textContent = name; }
+            if (reason) { b.dataset.trReason = reason; b.querySelector(".mm-statbar-reason").textContent = reason; }
             ok++;
         });
         if (ok) btn.classList.add("mm-statbars-tr-on");
-        else try { toastr?.error?.("Не удалось перевести причины.", "Полоска-стат"); } catch (e) {}
+        else try { toastr?.error?.("Не удалось перевести.", "Полоска-стат"); } catch (e) {}
     } finally {
         delete btn.dataset.busy;
         btn.classList.remove("mm-statbars-tr-wait");
@@ -544,8 +612,11 @@ function barCardHtml(i) {
           <div class="mm-sb-fold fa-solid fa-chevron-down interactable" title="Свернуть / развернуть" tabindex="0"></div>
         </div>
         <div class="mm-sb-body">
-          <label class="mm-sb-lbl">Название стата</label>
-          <input type="text" class="text_pole mm-sb-name" placeholder="HP / Нервный срыв / Доверие">
+          <label class="mm-sb-lbl">Название стата (лучше английское — его читает модель)</label>
+          <div class="mm-sb-namerow">
+            <input type="text" class="text_pole mm-sb-name" placeholder="Health / Trust / Stamina">
+            <div class="menu_button mm-sb-namegen" title="Придумать английское название по описанию (запрос к модели)">✨</div>
+          </div>
           <label class="mm-sb-lbl">📝 Промт этого стата — что это и как меняется</label>
           <textarea class="text_pole mm-sb-meaning" rows="3" placeholder="e.g.: Physical health. Wounds and fatigue lower it, rest and healing raise it. (English works best for the model)"></textarea>
           <div class="mm-sb-examples">Примеры: ${chips}</div>
@@ -636,6 +707,24 @@ function openModal() {
             updatePreview();
         });
         field(card, ".mm-sb-fold").addEventListener("click", () => card.classList.toggle("mm-sb-collapsed"));
+        // ✨ Придумать название по описанию.
+        field(card, ".mm-sb-namegen").addEventListener("click", async (e) => {
+            const gb = e.currentTarget;
+            if (gb.dataset.busy) return;
+            gb.dataset.busy = "1";
+            const old = gb.textContent;
+            gb.textContent = "⏳";
+            try {
+                const name = await generateName(field(card, ".mm-sb-meaning").value);
+                if (!name) return;
+                field(card, ".mm-sb-name").value = name;
+                field(card, ".mm-sb-cardname").textContent = name;
+                updatePreview();
+            } finally {
+                delete gb.dataset.busy;
+                gb.textContent = old;
+            }
+        });
         // Кнопки-примеры: подставляют готовый промт в поля этой карточки (без сохранения).
         card.querySelectorAll(".mm-sb-ex").forEach((chip) => {
             chip.addEventListener("click", () => {
@@ -809,6 +898,8 @@ function injectStyles() {
         border:1px solid var(--SmartThemeBorderColor); border-radius:10px; padding:6px 10px;
         background: color-mix(in srgb, var(--SmartThemeBodyColor) 5%, transparent);
       }
+      #mm-statbar-modal .mm-sb-namerow { display:flex; align-items:center; gap:6px; }
+      #mm-statbar-modal .mm-sb-namegen { width:auto; flex:none; padding:0 8px; line-height:1.9; }
       #mm-statbar-modal .mm-sb-cardhead { display:flex; align-items:center; gap:8px; }
       #mm-statbar-modal .mm-sb-cardtitle { flex:1; margin:0; }
       #mm-statbar-modal .mm-sb-fold { cursor:pointer; opacity:.6; padding:4px 6px; transition: transform .2s ease; }
