@@ -1,15 +1,18 @@
 // ============================================================================
-// Механик машин — «Универсальная полоска-стат» (statBar).
+// Механик машин — «Универсальные полоски-статы» (statBar).
 //
 // САМОСТОЯТЕЛЬНОЕ дополнение. НЕ трогает встроенные сайд-трекеры/сайд-промпты
 // плагина и их файлы — это отдельная сущность.
 //
-// Одна перенастраиваемая полоска (как HP). Смысл задаёшь промтом:
-//   • фикс. часть (формат [[Имя:N]], 0–100, «меняй от прошлого») — зашита тут;
-//   • твоя часть (что за стат и как меняется) — пишешь в настройке.
+// До 4 перенастраиваемых полосок (как HP). Смысл каждой задаёшь промтом:
+//   • фикс. часть (формат [[Имя:N|причина]], диапазон, «меняй от прошлого»)
+//     — зашита тут и ОДНА на все полоски;
+//   • твоя часть (что за стат и как меняется) — своя у каждой полоски.
+// Полоска участвует в промте только если у неё стоит галочка: включённые
+// собираются в один общий системный промт списком.
 // Значение выдаёт модель прямо в ответе (inline): в конце реплики ставит
-// [[Имя:N]] — модуль вырезает метку из текста и рисует полоску под именем
-// в бабле сообщения. (Этап 2 — пересчёт на создании памяти — добавится позже.)
+// [[Имя:N|причина]] — модуль вырезает метки из текста и рисует полоски под
+// именем в бабле сообщения, а причину — строкой под полоской.
 // ============================================================================
 
 import { saveSettingsDebounced, chat_metadata } from "../../../../script.js";
@@ -19,63 +22,111 @@ import { METADATA_KEY, world_names, loadWorldInfo } from "../../../world-info.js
 const MODULE = "Механик машин/полоска-стат";
 const BTN_ID = "mm-statbar-button";
 const INJECT_KEY = "MM_STATBAR";
+const BAR_COUNT = 4;
+const REASON_WORDS = 8;
 
 let ctxRef = null;
 let obs = null;
 let obsTimer = null;
 let stylesInjected = false;
-let pendingNext = null; // «накрутка»: форс значения на следующий ответ (одноразово)
+let pendingNext = {}; // «накрутка»: {имя стата: значение} на следующий ответ (одноразово)
 
 // Готовые примеры (кнопки в попапе подставляют их в поля).
 const EXAMPLES = [
     {
-        name: "Здоровье", min: 0, max: 100,
+        chip: "❤️ Здоровье", name: "Здоровье", min: 0, max: 100,
         meaning: "Physical health of {{char}}. Wounds, hits, exhaustion, hunger and illness lower it; rest, healing, food and sleep raise it. " +
             "Expected behavior: 80-100 — energetic and strong; 40-79 — pain and fatigue show, acts more carefully; 15-39 — weak, moves with difficulty, makes mistakes; 1-14 — on the edge, may lose consciousness; 0 — mortally wounded / unconscious.",
     },
     {
-        name: "Срыв", min: 0, max: 100,
+        chip: "😰 Срыв", name: "Срыв", min: 0, max: 100,
         meaning: "Mental stability of {{char}}. Stress, threats, conflict and fear lower it; support, safety, rest and closeness raise it. " +
             "Expected behavior: 80-100 — calm and level-headed; 40-79 — nervous, irritable; 15-39 — panicking, lashing out, tears or aggression; 1-14 — on the verge of a breakdown, poor self-control; 0 — full breakdown, stupor or hysteria.",
     },
     {
-        name: "Доверие", min: 0, max: 100,
+        chip: "🤝 Доверие", name: "Доверие", min: 0, max: 100,
         meaning: "How much {{char}} trusts {{user}}. Honesty, help and care raise it; lies, threats and betrayal lower it. " +
             "Expected behavior: 80-100 — open, shares secrets, seeks closeness; 40-79 — friendly but cautious; 15-39 — wary, secretive, tests words; 1-14 — suspicious, snaps, expects a trick; 0 — hostile, rejects contact.",
+    },
+    {
+        chip: "⚡ Энергия", name: "Энергия", min: 0, max: 100,
+        meaning: "Stamina of {{char}}. Fights, running, hard work, sleepless nights and heat drain it; sleep, food, drink and calm rest restore it. " +
+            "Expected behavior: 80-100 — fresh, ready for anything; 40-79 — tired but holding on; 15-39 — heavy breathing, wants to sit down, sloppy; 1-14 — barely on their feet; 0 — collapses from exhaustion.",
     },
 ];
 
 // ----------------------------------------------------------------------------
 // Настройка (в extension_settings.STMemoryBooks.mm_statBar — своя ветка)
 // ----------------------------------------------------------------------------
+function defaultBar(i) {
+    const ex = EXAMPLES[i] || EXAMPLES[0];
+    return { enabled: i === 0, name: ex.name, meaning: ex.meaning, min: ex.min, max: ex.max };
+}
+
 function cfg() {
     const s = extension_settings.STMemoryBooks || (extension_settings.STMemoryBooks = {});
-    if (!s.mm_statBar) {
-        s.mm_statBar = {
-            enabled: false,
-            name: EXAMPLES[0].name,
-            meaning: EXAMPLES[0].meaning,
-            min: 0,
-            max: 100,
-            inline: true,
-            onMemory: false,
-        };
+    const c = s.mm_statBar || (s.mm_statBar = { enabled: false, inline: true, onMemory: false });
+
+    // Миграция со старой одиночной полоски (name/meaning/min/max в корне).
+    if (!Array.isArray(c.bars)) {
+        c.bars = [];
+        if (typeof c.name === "string") {
+            c.bars.push({ enabled: true, name: c.name, meaning: c.meaning || "", min: c.min ?? 0, max: c.max ?? 100 });
+            delete c.name; delete c.meaning; delete c.min; delete c.max;
+        }
     }
-    return s.mm_statBar;
+    while (c.bars.length < BAR_COUNT) c.bars.push(defaultBar(c.bars.length));
+    c.bars.length = BAR_COUNT;
+    if (typeof c.inline !== "boolean") c.inline = true;
+    if (typeof c.onMemory !== "boolean") c.onMemory = false;
+    if (typeof c.enabled !== "boolean") c.enabled = false;
+    return c;
 }
 function saveCfg() { saveSettingsDebounced(); }
+
+// Полоски, участвующие в промте и рендере. Имя — ключ метки, поэтому дубли
+// имён отбрасываем: иначе два стата дерутся за одну и ту же метку.
+function activeBars(c) {
+    const seen = new Set();
+    return (c.bars || []).filter((b) => {
+        const n = String(b?.name || "").trim();
+        if (!b?.enabled || !n || seen.has(n)) return false;
+        seen.add(n);
+        return true;
+    });
+}
+// Все заданные имена — чтобы вычищать метки даже от выключенных полосок.
+function allNames(c) {
+    return [...new Set((c.bars || []).map((b) => String(b?.name || "").trim()).filter(Boolean))];
+}
 
 // ----------------------------------------------------------------------------
 // Вспомогательное
 // ----------------------------------------------------------------------------
 function escapeRe(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
+
+// [[Имя:N]] или [[Имя:N|короткая причина]] — причина необязательна (старый формат).
 function markerRe(name, g) {
-    return new RegExp("\\[\\[\\s*" + escapeRe(name) + "\\s*:\\s*(-?\\d+)\\s*\\]\\]", g ? "ig" : "i");
+    return new RegExp(
+        "\\[\\[\\s*" + escapeRe(name) + "\\s*:\\s*(-?\\d+)\\s*(?:\\|([^\\]]*))?\\]\\]",
+        g ? "ig" : "i",
+    );
 }
-function parseValue(text, name) {
+function parseMarker(text, name) {
     const m = String(text || "").match(markerRe(name));
-    return m ? parseInt(m[1], 10) : null;
+    return m ? { val: parseInt(m[1], 10), reason: clipReason(m[2]) } : null;
+}
+function stripMarkers(text, names) {
+    let t = String(text || "");
+    for (const n of names) t = t.replace(markerRe(n, true), "");
+    return t;
+}
+function clipReason(s) {
+    let t = String(s || "").replace(/[\r\n|\]]+/g, " ").replace(/\s+/g, " ").trim();
+    const w = t.split(" ").filter(Boolean);
+    if (w.length > REASON_WORDS) t = w.slice(0, REASON_WORDS).join(" ");
+    return t.slice(0, 80);
 }
 function colorFor(pct) {
     // 0% = красный (hue 0), 100% = зелёный (hue 120)
@@ -86,16 +137,30 @@ function colorFor(pct) {
 // ----------------------------------------------------------------------------
 // Инъекция инструкции модели (inline-режим)
 // ----------------------------------------------------------------------------
-// Сборка полного промта = ФИКС. часть (голова) + твоя часть + ФИКС. часть (хвост).
-// Фикс-часть и примеры — по-английски (надёжнее для модели). Название стата
-// (c.name) остаётся как задал пользователь — обычно русское.
+// Один общий системный промт на ВСЕ включённые полоски:
+//   ФИКС. голова + список статов (имя, диапазон, твой промт) + ФИКС. хвост.
+// Фикс-часть и примеры — по-английски (надёжнее для модели). Названия статов
+// остаются как задал пользователь — обычно русские.
 function buildInjectionText(c) {
-    const head = `[System instruction] At the very end of your reply, on a separate line, output the current "${c.name}" value strictly in the format [[${c.name}:N]], where N is an integer from ${c.min} to ${c.max}.`;
-    const tail = `Change N relative to its previous value (the last such marker earlier in the chat); do not reset it to the maximum. Do not mention this stat anywhere else in the text — only in this single marker.`;
-    const override = pendingNext != null
-        ? ` For THIS reply only, set "${c.name}" to exactly ${pendingNext} (manual override); reflect this value in the scene, then continue normally afterward.`
+    const list = activeBars(c);
+    if (!list.length) return "";
+
+    const head = `[System instruction] At the very end of your reply, after the scene text, output one separate line for EACH stat listed below, strictly in the format [[Name:N|reason]] — where N is an integer within that stat's range, and reason is a very short phrase (max ${REASON_WORDS} words, in the language of your reply) naming the concrete cause of the change since its previous value. If a value did not change, name what keeps it there.`;
+
+    const stats = list
+        .map((b) => `- "${b.name}" (${b.min}-${b.max}): ${String(b.meaning || "").trim()}`)
+        .join("\n");
+
+    const tail = `Rules: change each N relative to ITS OWN previous value (the last marker with the same name earlier in the chat); do not reset it to the maximum. Each stat is independent of the others. Do not mention these stats, their numbers or their reasons anywhere else in the text — only inside these markers.`;
+
+    const forced = list
+        .filter((b) => pendingNext[b.name] != null)
+        .map((b) => `set "${b.name}" to exactly ${pendingNext[b.name]}`);
+    const override = forced.length
+        ? `\nManual override for THIS reply only: ${forced.join("; ")}. Reflect these values in the scene, then continue normally afterwards.`
         : "";
-    return `${head} ${String(c.meaning || "").trim()} ${tail}${override}`;
+
+    return `${head}\n\nStats:\n${stats}\n\n${tail}${override}`;
 }
 
 function updateInjection() {
@@ -103,16 +168,16 @@ function updateInjection() {
     const setEP = ctxRef?.setExtensionPrompt || (typeof window !== "undefined" && window.setExtensionPrompt);
     if (typeof setEP !== "function") return;
     try {
-        if (!c.enabled || !c.inline) { setEP(INJECT_KEY, ""); return; }
+        const text = (!c.enabled || !c.inline) ? "" : buildInjectionText(c);
         // position 1 = в чат, depth 0 = в самом конце
-        setEP(INJECT_KEY, buildInjectionText(c), 1, 0, false, 0);
+        setEP(INJECT_KEY, text, 1, 0, false, 0);
     } catch (e) {
         console.warn(`[${MODULE}] инъекция:`, e);
     }
 }
 
 // ----------------------------------------------------------------------------
-// Этап 2: пересчёт стата отдельным AI-запросом (по сцене / вручную)
+// Этап 2: пересчёт статов отдельным AI-запросом (по сцене / вручную)
 // ----------------------------------------------------------------------------
 function resolveLorebookNamePassive() {
     try {
@@ -144,62 +209,80 @@ async function getLatestMemoryRange() {
     }
 }
 
-function buildScenePrompt(startId, endId) {
-    const c = cfg();
+function buildScenePrompt(list, names, startId, endId) {
     const chat = ctxRef?.chat || [];
     const parts = [];
     for (let i = startId; i <= endId; i++) {
         const m = chat[i];
         if (!m) continue;
-        const clean = String(m.mes || "").replace(markerRe(c.name, true), "").trim();
+        const clean = stripMarkers(m.mes, names).trim();
         if (clean) parts.push(`${m.name || (m.is_user ? "User" : "Char")}: ${clean}`);
     }
     let scene = parts.join("\n");
     if (scene.length > 12000) scene = scene.slice(scene.length - 12000);
-    return `${scene}\n\n---\nEvaluate the "${c.name}" stat for this scene. ${c.meaning} ` +
-        `Reply with STRICTLY one line in the format [[${c.name}:N]], where N is an integer from ${c.min} to ${c.max}. Write nothing else.`;
+
+    const stats = list
+        .map((b) => `- "${b.name}" (${b.min}-${b.max}): ${String(b.meaning || "").trim()}`)
+        .join("\n");
+
+    return `${scene}\n\n---\nEvaluate the stats below for this scene.\n\nStats:\n${stats}\n\n` +
+        `Reply with STRICTLY one line per stat, in the format [[Name:N|reason]], where N is an integer within that stat's range ` +
+        `and reason is a very short phrase (max ${REASON_WORDS} words) naming the cause of the change. Write nothing else.`;
 }
 
-async function computeStat(startId, endId) {
+async function computeStats(startId, endId) {
     const c = cfg();
+    const list = activeBars(c);
+    if (!list.length) return [];
     const gen = ctxRef?.generateRaw;
     if (typeof gen !== "function") {
         try { toastr?.warning?.("generateRaw недоступен в этой версии SillyTavern.", "Полоска-стат"); } catch (e) {}
-        return null;
+        return [];
     }
-    const prompt = buildScenePrompt(startId, endId);
+    const prompt = buildScenePrompt(list, allNames(c), startId, endId);
     let resp;
     try {
-        resp = await gen({ prompt, responseLength: 24, trimNames: true });
+        resp = await gen({ prompt, responseLength: 24 * list.length + 32, trimNames: true });
     } catch (e) {
-        console.warn(`[${MODULE}] computeStat generateRaw:`, e);
-        try { toastr?.error?.("Не удалось пересчитать стат (ошибка запроса).", "Полоска-стат"); } catch (er) {}
-        return null;
+        console.warn(`[${MODULE}] computeStats generateRaw:`, e);
+        try { toastr?.error?.("Не удалось пересчитать статы (ошибка запроса).", "Полоска-стат"); } catch (er) {}
+        return [];
     }
-    let val = parseValue(resp, c.name);
-    if (val == null) {
-        const num = String(resp || "").match(/-?\d+/);
-        val = num ? parseInt(num[0], 10) : null;
+
+    const out = [];
+    for (const b of list) {
+        let hit = parseMarker(resp, b.name);
+        // Одна полоска и модель ответила голым числом — принимаем.
+        if (!hit && list.length === 1) {
+            const num = String(resp || "").match(/-?\d+/);
+            if (num) hit = { val: parseInt(num[0], 10), reason: "" };
+        }
+        if (!hit) continue;
+        out.push({ name: b.name, val: clamp(hit.val, b.min, b.max), reason: hit.reason });
     }
-    return val == null ? null : clamp(val, c.min, c.max);
+    return out;
 }
 
-// Проставить значение как метку в конкретное сообщение (переиспользует рендер).
-function setMarkerOnMessage(id, name, val) {
+// Проставить значения метками в конкретное сообщение (переиспользует рендер).
+function setMarkersOnMessage(id, items) {
     const msg = ctxRef?.chat?.[id];
-    if (!msg) return;
-    const stripped = String(msg.mes || "").replace(markerRe(name, true), "").replace(/\s+$/, "");
-    msg.mes = `${stripped} [[${name}:${val}]]`;
+    if (!msg || !items.length) return;
+    const names = items.map((i) => i.name);
+    const stripped = stripMarkers(msg.mes, names).replace(/[ \t]+$/gm, "").replace(/\s+$/, "");
+    const marks = items.map((i) => `[[${i.name}:${i.val}${i.reason ? `|${i.reason}` : ""}]]`).join("\n");
+    msg.mes = `${stripped}\n${marks}`;
     try { ctxRef?.saveChat?.(); } catch (e) { /* сохранится при следующем естественном сохранении */ }
 }
 
 async function recompute(startId, endId, { silent = false } = {}) {
-    const val = await computeStat(startId, endId);
-    if (val == null) return null;
-    setMarkerOnMessage(endId, cfg().name, val);
+    const items = await computeStats(startId, endId);
+    if (!items.length) return null;
+    setMarkersOnMessage(endId, items);
     refreshAll();
-    if (!silent) { try { toastr?.success?.(`${cfg().name}: ${val}`, "Полоска-стат"); } catch (e) {} }
-    return val;
+    if (!silent) {
+        try { toastr?.success?.(items.map((i) => `${i.name}: ${i.val}`).join(", "), "Полоска-стат"); } catch (e) {}
+    }
+    return items;
 }
 
 // Авто-пересчёт при создании памяти.
@@ -207,12 +290,14 @@ let onMemBusy = false;
 async function runOnMemory() {
     const c = cfg();
     if (!c.enabled || !c.onMemory || onMemBusy) return;
+    const list = activeBars(c);
+    if (!list.length) return;
     const range = await getLatestMemoryRange();
     if (!range) return;
     const endMsg = ctxRef?.chat?.[range.end];
     if (!endMsg) return;
-    // уже есть метка на конце сцены — пропускаем (защита от повтора)
-    if (parseValue(endMsg.mes, c.name) != null) return;
+    // все включённые статы уже отмечены на конце сцены — пропускаем (защита от повтора)
+    if (list.every((b) => parseMarker(endMsg.mes, b.name) != null)) return;
     onMemBusy = true;
     try {
         await recompute(range.start, range.end, { silent: true });
@@ -222,55 +307,87 @@ async function runOnMemory() {
 }
 
 // ----------------------------------------------------------------------------
-// Рендер полоски в бабле + скрытие метки
+// Рендер полосок в бабле + скрытие меток
 // ----------------------------------------------------------------------------
-function hideMarker(el, name) {
+function hideMarkers(el, names) {
     const t = el.querySelector(".mes_text");
     if (!t) return;
-    const re = markerRe(name, true);
-    if (re.test(t.innerHTML)) {
-        t.innerHTML = t.innerHTML.replace(markerRe(name, true), "");
+    for (const n of names) {
+        const re = markerRe(n, true);
+        if (re.test(t.innerHTML)) t.innerHTML = t.innerHTML.replace(markerRe(n, true), "");
     }
 }
-function removeBar(el) {
-    el.querySelector(".mm-statbar")?.remove();
+function removeBars(el) {
+    el.querySelector(".mm-statbars")?.remove();
 }
-function renderBar(el, name, val, min, max) {
+
+function renderBars(el, items) {
     const block = el.querySelector(".mes_block") || el;
-    let bar = el.querySelector(".mm-statbar");
-    if (!bar) {
-        bar = document.createElement("div");
-        bar.className = "mm-statbar";
+    let wrap = el.querySelector(".mm-statbars");
+    if (!items.length) { wrap?.remove(); return; }
+    if (!wrap) {
+        wrap = document.createElement("div");
+        wrap.className = "mm-statbars";
         const chip = block.querySelector(".stmb_mem_label");
         const text = block.querySelector(".mes_text");
-        if (chip && chip.parentElement === block) chip.after(bar);
-        else if (text) block.insertBefore(bar, text);
-        else block.appendChild(bar);
-        bar.innerHTML =
-            `<span class="mm-statbar-name"></span>` +
-            `<span class="mm-statbar-track"><span class="mm-statbar-fill"></span></span>` +
-            `<span class="mm-statbar-val"></span>`;
+        if (chip && chip.parentElement === block) chip.after(wrap);
+        else if (text) block.insertBefore(wrap, text);
+        else block.appendChild(wrap);
     }
-    const range = (max - min) || 1;
-    const pct = Math.round(((val - min) / range) * 100);
-    bar.querySelector(".mm-statbar-name").textContent = name;
-    bar.querySelector(".mm-statbar-val").textContent = `${val}`;
-    const fill = bar.querySelector(".mm-statbar-fill");
-    fill.style.width = clamp(pct, 0, 100) + "%";
-    fill.style.background = colorFor(pct);
-    bar.title = `${name}: ${val} / ${max}`;
+
+    // Ищем по dataset, а не селектором: имя стата — произвольный текст.
+    const existing = new Map();
+    for (const child of [...wrap.children]) existing.set(child.dataset.stat, child);
+
+    for (const it of items) {
+        let bar = existing.get(it.name);
+        if (!bar) {
+            bar = document.createElement("div");
+            bar.className = "mm-statbar";
+            bar.dataset.stat = it.name;
+            bar.innerHTML =
+                `<div class="mm-statbar-row">` +
+                `<span class="mm-statbar-name"></span>` +
+                `<span class="mm-statbar-track"><span class="mm-statbar-fill"></span></span>` +
+                `<span class="mm-statbar-val"></span>` +
+                `</div>` +
+                `<div class="mm-statbar-reason"></div>`;
+        }
+        existing.delete(it.name);
+        wrap.appendChild(bar); // перенос уже существующего узла = порядок как в настройке
+
+        const range = (it.max - it.min) || 1;
+        const pct = Math.round(((it.val - it.min) / range) * 100);
+        bar.querySelector(".mm-statbar-name").textContent = it.name;
+        bar.querySelector(".mm-statbar-val").textContent = `${it.val}`;
+        const fill = bar.querySelector(".mm-statbar-fill");
+        fill.style.width = clamp(pct, 0, 100) + "%";
+        fill.style.background = colorFor(pct);
+        const rs = bar.querySelector(".mm-statbar-reason");
+        rs.textContent = it.reason || "";
+        rs.style.display = it.reason ? "" : "none";
+        bar.title = `${it.name}: ${it.val} / ${it.max}${it.reason ? ` — ${it.reason}` : ""}`;
+    }
+    // Полоски, которых в этом сообщении больше нет (выключили / переименовали).
+    for (const stale of existing.values()) stale.remove();
 }
 
 function processMessage(el) {
     const c = cfg();
-    if (!c.enabled) { removeBar(el); return; }
+    if (!c.enabled) { removeBars(el); return; }
     const id = parseInt(el.getAttribute("mesid"));
     const msg = ctxRef?.chat?.[id];
     if (!msg) return;
-    const val = parseValue(msg.mes, c.name);
-    hideMarker(el, c.name);
-    if (val == null) { removeBar(el); return; }
-    renderBar(el, c.name, clamp(val, c.min, c.max), c.min, c.max);
+
+    hideMarkers(el, allNames(c));
+
+    const items = [];
+    for (const b of activeBars(c)) {
+        const hit = parseMarker(msg.mes, b.name);
+        if (!hit) continue;
+        items.push({ name: b.name, val: clamp(hit.val, b.min, b.max), reason: hit.reason, min: b.min, max: b.max });
+    }
+    renderBars(el, items);
 }
 
 function refreshAll() {
@@ -298,7 +415,7 @@ function createButton() {
     const btn = document.createElement("div");
     btn.id = BTN_ID;
     btn.className = "fa-solid fa-chart-simple interactable";
-    btn.title = "Полоска-стат (настройка)";
+    btn.title = "Полоски-статы (настройка)";
     btn.tabIndex = 0;
     btn.addEventListener("click", openModal);
 
@@ -313,6 +430,35 @@ function createButton() {
     btn.style.order = String(wandOrder + 3);
 }
 
+function barCardHtml(i) {
+    const chips = EXAMPLES.map((e, k) => `<span class="mm-sb-ex" data-ex="${k}">${e.chip}</span>`).join(" ");
+    return `
+      <div class="mm-sb-card" data-i="${i}">
+        <div class="mm-sb-cardhead">
+          <label class="mm-sb-row mm-sb-cardtitle">
+            <input type="checkbox" class="mm-sb-on">
+            <b class="mm-sb-cardname">Полоска ${i + 1}</b>
+          </label>
+          <div class="mm-sb-fold fa-solid fa-chevron-down interactable" title="Свернуть / развернуть" tabindex="0"></div>
+        </div>
+        <div class="mm-sb-body">
+          <label class="mm-sb-lbl">Название стата</label>
+          <input type="text" class="text_pole mm-sb-name" placeholder="HP / Нервный срыв / Доверие">
+          <label class="mm-sb-lbl">📝 Промт этого стата — что это и как меняется</label>
+          <textarea class="text_pole mm-sb-meaning" rows="3" placeholder="e.g.: Physical health. Wounds and fatigue lower it, rest and healing raise it. (English works best for the model)"></textarea>
+          <div class="mm-sb-examples">Примеры: ${chips}</div>
+          <div class="mm-sb-range">
+            <label class="mm-sb-lbl">Мин</label><input type="number" class="text_pole mm-sb-min">
+            <label class="mm-sb-lbl">Макс</label><input type="number" class="text_pole mm-sb-max">
+          </div>
+          <div class="mm-sb-next">
+            <label class="mm-sb-lbl" style="margin:0;flex:1">↯ Накрутить на следующий ответ:</label>
+            <input type="number" class="text_pole mm-sb-nextval" style="width:74px" placeholder="напр. 30">
+          </div>
+        </div>
+      </div>`;
+}
+
 function openModal() {
     document.getElementById("mm-statbar-modal")?.remove();
     const c = cfg();
@@ -321,31 +467,19 @@ function openModal() {
     ov.innerHTML = `
       <div class="mm-sb-box">
         <div class="mm-sb-head">
-          <div class="mm-sb-title"><i class="fa-solid fa-chart-simple"></i> Полоска-стат</div>
+          <div class="mm-sb-title"><i class="fa-solid fa-chart-simple"></i> Полоски-статы</div>
           <div class="mm-sb-close fa-solid fa-xmark interactable" title="Закрыть" tabindex="0"></div>
         </div>
-        <label class="mm-sb-row"><input type="checkbox" id="mm-sb-enabled"> <span>Включить полоску</span></label>
-        <label class="mm-sb-lbl">Название стата</label>
-        <input type="text" id="mm-sb-name" class="text_pole" placeholder="HP / Нервный срыв / Доверие">
-        <label class="mm-sb-lbl">📝 Промт стата — что это и как меняется (твоя часть)</label>
-        <textarea id="mm-sb-meaning" class="text_pole" rows="4" placeholder="e.g.: Physical health. Wounds and fatigue lower it, rest and healing raise it. (English works best for the model)"></textarea>
-        <div class="mm-sb-examples">Готовые примеры: <span class="mm-sb-ex" data-ex="0">❤️ Здоровье</span> <span class="mm-sb-ex" data-ex="1">😰 Срыв</span> <span class="mm-sb-ex" data-ex="2">🤝 Доверие</span></div>
-        <div class="mm-sb-range">
-          <label class="mm-sb-lbl">Мин</label><input type="number" id="mm-sb-min" class="text_pole">
-          <label class="mm-sb-lbl">Макс</label><input type="number" id="mm-sb-max" class="text_pole">
-        </div>
-        <label class="mm-sb-lbl">👁 Полный промт модели (фикс. часть + твоя, только чтение)</label>
-        <textarea id="mm-sb-preview" class="text_pole" rows="5" readonly></textarea>
+        <label class="mm-sb-row"><input type="checkbox" id="mm-sb-enabled"> <span>Включить полоски</span></label>
         <label class="mm-sb-row"><input type="checkbox" id="mm-sb-inline"> <span>Модель заполняет сама (в каждом ответе)</span></label>
         <label class="mm-sb-row"><input type="checkbox" id="mm-sb-onmem"> <span>Пересчитывать на создании памяти (отдельный AI-запрос по сцене)</span></label>
-        <div class="mm-sb-next">
-          <label class="mm-sb-lbl" style="margin:0;flex:1">↯ Накрутить на следующий ответ:</label>
-          <input type="number" id="mm-sb-next" class="text_pole" style="width:74px" placeholder="напр. 30">
-          <div class="menu_button mm-sb-next-apply">Применить</div>
-        </div>
-        <div class="mm-sb-hint">Фиксированную часть промта (формат <code>[[Имя:N]]</code>, диапазон, «меняй от прошлого») модуль добавляет сам. Ты пишешь только смысл. «Накрутка» разово задаёт значение на следующий ответ ИИ.</div>
+        <div class="mm-sb-cards">${Array.from({ length: BAR_COUNT }, (_, i) => barCardHtml(i)).join("")}</div>
+        <label class="mm-sb-lbl">👁 Общий промт модели (фикс. часть + все включённые полоски, только чтение)</label>
+        <textarea id="mm-sb-preview" class="text_pole" rows="7" readonly></textarea>
+        <div class="mm-sb-hint">Системный промт <b>один на все полоски</b>: формат <code>[[Имя:N|причина]]</code>, диапазоны и «меняй от прошлого» модуль добавляет сам, а включённые галочкой полоски дописывает списком — имя, диапазон, твоё описание. Причина (до ${REASON_WORDS} слов) рисуется строкой под полоской. «Накрутка» разово задаёт значение на следующий ответ ИИ.</div>
         <div class="mm-sb-actions">
-          <div class="menu_button mm-sb-recompute" title="Посчитать стат по последней сцене прямо сейчас">↻ Пересчитать сейчас</div>
+          <div class="menu_button mm-sb-next-apply" title="Разово задать значения из полей «Накрутить»">↯ Применить накрутку</div>
+          <div class="menu_button mm-sb-recompute" title="Посчитать статы по последней сцене прямо сейчас">↻ Пересчитать сейчас</div>
           <div class="menu_button mm-sb-save">Сохранить</div>
           <div class="menu_button mm-sb-cancel">Отмена</div>
         </div>
@@ -353,26 +487,66 @@ function openModal() {
     document.body.appendChild(ov);
 
     ov.querySelector("#mm-sb-enabled").checked = !!c.enabled;
-    ov.querySelector("#mm-sb-name").value = c.name;
-    ov.querySelector("#mm-sb-meaning").value = c.meaning;
-    ov.querySelector("#mm-sb-min").value = c.min;
-    ov.querySelector("#mm-sb-max").value = c.max;
     ov.querySelector("#mm-sb-inline").checked = !!c.inline;
     ov.querySelector("#mm-sb-onmem").checked = !!c.onMemory;
 
-    // Живой предпросмотр полного промта (фикс. + твоя часть).
+    const cards = [...ov.querySelectorAll(".mm-sb-card")];
+    const field = (card, sel) => card.querySelector(sel);
+
+    cards.forEach((card, i) => {
+        const b = c.bars[i];
+        field(card, ".mm-sb-on").checked = !!b.enabled;
+        field(card, ".mm-sb-name").value = b.name;
+        field(card, ".mm-sb-meaning").value = b.meaning;
+        field(card, ".mm-sb-min").value = b.min;
+        field(card, ".mm-sb-max").value = b.max;
+        field(card, ".mm-sb-cardname").textContent = b.name || `Полоска ${i + 1}`;
+        card.classList.toggle("mm-sb-collapsed", !b.enabled); // выключенные свёрнуты
+    });
+
+    // Считать поля окна в объект (без записи в настройку) — для превью.
+    const readBar = (card, i) => ({
+        enabled: field(card, ".mm-sb-on").checked,
+        name: (field(card, ".mm-sb-name").value || "").trim() || `Стат ${i + 1}`,
+        meaning: field(card, ".mm-sb-meaning").value || "",
+        min: Number.isFinite(parseInt(field(card, ".mm-sb-min").value, 10)) ? parseInt(field(card, ".mm-sb-min").value, 10) : 0,
+        max: Number.isFinite(parseInt(field(card, ".mm-sb-max").value, 10)) ? parseInt(field(card, ".mm-sb-max").value, 10) : 100,
+    });
+
+    // Живой предпросмотр общего промта.
     const updatePreview = () => {
         const pv = ov.querySelector("#mm-sb-preview");
         if (!pv) return;
-        pv.value = buildInjectionText({
-            name: (ov.querySelector("#mm-sb-name").value || "HP").trim() || "HP",
-            meaning: ov.querySelector("#mm-sb-meaning").value || "",
-            min: parseInt(ov.querySelector("#mm-sb-min").value, 10) || 0,
-            max: parseInt(ov.querySelector("#mm-sb-max").value, 10) || 100,
-        });
+        const draft = { bars: cards.map(readBar) };
+        pv.value = buildInjectionText(draft) || "(ни одна полоска не включена — промт не добавляется)";
     };
-    ["#mm-sb-name", "#mm-sb-meaning", "#mm-sb-min", "#mm-sb-max"].forEach((sel) =>
-        ov.querySelector(sel)?.addEventListener("input", updatePreview));
+
+    cards.forEach((card, i) => {
+        card.addEventListener("input", () => {
+            field(card, ".mm-sb-cardname").textContent = (field(card, ".mm-sb-name").value || "").trim() || `Полоска ${i + 1}`;
+            updatePreview();
+        });
+        field(card, ".mm-sb-on").addEventListener("change", (e) => {
+            if (e.target.checked) card.classList.remove("mm-sb-collapsed");
+            updatePreview();
+        });
+        field(card, ".mm-sb-fold").addEventListener("click", () => card.classList.toggle("mm-sb-collapsed"));
+        // Кнопки-примеры: подставляют готовый промт в поля этой карточки (без сохранения).
+        card.querySelectorAll(".mm-sb-ex").forEach((chip) => {
+            chip.addEventListener("click", () => {
+                const ex = EXAMPLES[parseInt(chip.dataset.ex, 10)];
+                if (!ex) return;
+                field(card, ".mm-sb-name").value = ex.name;
+                field(card, ".mm-sb-meaning").value = ex.meaning;
+                field(card, ".mm-sb-min").value = ex.min;
+                field(card, ".mm-sb-max").value = ex.max;
+                field(card, ".mm-sb-on").checked = true;
+                field(card, ".mm-sb-cardname").textContent = ex.name;
+                card.classList.remove("mm-sb-collapsed");
+                updatePreview();
+            });
+        });
+    });
     updatePreview();
 
     const close = () => ov.remove();
@@ -380,29 +554,34 @@ function openModal() {
     ov.querySelector(".mm-sb-cancel").addEventListener("click", close);
     ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
 
-    // Кнопки-примеры: подставляют готовый промт в поля (без сохранения).
-    ov.querySelectorAll(".mm-sb-ex").forEach((chip) => {
-        chip.addEventListener("click", () => {
-            const ex = EXAMPLES[parseInt(chip.dataset.ex, 10)];
-            if (!ex) return;
-            ov.querySelector("#mm-sb-name").value = ex.name;
-            ov.querySelector("#mm-sb-meaning").value = ex.meaning;
-            ov.querySelector("#mm-sb-min").value = ex.min;
-            ov.querySelector("#mm-sb-max").value = ex.max;
-            ov.querySelector("#mm-sb-enabled").checked = true;
-            updatePreview();
+    // Считать поля окна в настройку (без закрытия).
+    const commitFields = () => {
+        c.enabled = ov.querySelector("#mm-sb-enabled").checked;
+        c.inline = ov.querySelector("#mm-sb-inline").checked;
+        c.onMemory = ov.querySelector("#mm-sb-onmem").checked;
+        cards.forEach((card, i) => {
+            const draft = readBar(card, i);
+            if (draft.max <= draft.min) draft.max = draft.min + 1;
+            c.bars[i] = draft;
         });
+        saveCfg();
+    };
+
+    ov.querySelector(".mm-sb-save").addEventListener("click", () => {
+        commitFields();
+        updateInjection();
+        refreshAll();
+        close();
+        const on = activeBars(c).map((b) => b.name).join(", ");
+        try {
+            toastr?.success?.(c.enabled && on ? `Включено: ${on}` : "Полоски выключены.", "Полоска-стат");
+        } catch (e) {}
     });
 
     // Пересчитать сейчас — по последней сцене (диапазону памяти) или последним сообщениям.
     ov.querySelector(".mm-sb-recompute").addEventListener("click", async () => {
-        // применим текущие поля без закрытия
-        c.name = (ov.querySelector("#mm-sb-name").value || "HP").trim() || "HP";
-        c.meaning = ov.querySelector("#mm-sb-meaning").value || "";
-        c.min = parseInt(ov.querySelector("#mm-sb-min").value, 10); if (!Number.isFinite(c.min)) c.min = 0;
-        c.max = parseInt(ov.querySelector("#mm-sb-max").value, 10); if (!Number.isFinite(c.max)) c.max = 100;
-        if (c.max <= c.min) c.max = c.min + 1;
-        saveCfg();
+        commitFields();
+        if (!activeBars(c).length) { try { toastr?.info?.("Включи хотя бы одну полоску.", "Полоска-стат"); } catch (e) {} return; }
         const btn = ov.querySelector(".mm-sb-recompute");
         const old = btn.textContent; btn.textContent = "⏳ Считаю…";
         try {
@@ -419,40 +598,26 @@ function openModal() {
             btn.textContent = old;
         }
     });
-    // Считать поля окна в настройку (без закрытия).
-    const commitFields = () => {
-        c.enabled = ov.querySelector("#mm-sb-enabled").checked;
-        c.name = (ov.querySelector("#mm-sb-name").value || "Здоровье").trim() || "Здоровье";
-        c.meaning = ov.querySelector("#mm-sb-meaning").value || "";
-        c.min = parseInt(ov.querySelector("#mm-sb-min").value, 10); if (!Number.isFinite(c.min)) c.min = 0;
-        c.max = parseInt(ov.querySelector("#mm-sb-max").value, 10); if (!Number.isFinite(c.max)) c.max = 100;
-        if (c.max <= c.min) c.max = c.min + 1;
-        c.inline = ov.querySelector("#mm-sb-inline").checked;
-        c.onMemory = ov.querySelector("#mm-sb-onmem").checked;
-        saveCfg();
-    };
 
-    ov.querySelector(".mm-sb-save").addEventListener("click", () => {
-        commitFields();
-        updateInjection();
-        refreshAll();
-        close();
-        try { toastr?.success?.(c.enabled ? `Полоска «${c.name}» включена.` : "Полоска выключена.", "Полоска-стат"); } catch (e) {}
-    });
-
-    // Накрутка: разово задать значение на следующий ответ ИИ.
+    // Накрутка: разово задать значения на следующий ответ ИИ.
     ov.querySelector(".mm-sb-next-apply").addEventListener("click", () => {
         commitFields();
-        const raw = parseInt(ov.querySelector("#mm-sb-next").value, 10);
-        if (!Number.isFinite(raw)) { try { toastr?.info?.("Введи число.", "Полоска-стат"); } catch (e) {} return; }
-        const val = clamp(raw, c.min, c.max);
-        pendingNext = val;
+        const items = [];
+        cards.forEach((card, i) => {
+            const b = c.bars[i];
+            const raw = parseInt(field(card, ".mm-sb-nextval").value, 10);
+            if (!b.enabled || !Number.isFinite(raw)) return;
+            const val = clamp(raw, b.min, b.max);
+            pendingNext[b.name] = val;
+            items.push({ name: b.name, val, reason: "" });
+        });
+        if (!items.length) { try { toastr?.info?.("Введи число хотя бы у одной включённой полоски.", "Полоска-стат"); } catch (e) {} return; }
         c.enabled = true; ov.querySelector("#mm-sb-enabled").checked = true; saveCfg();
         updateInjection();
         // мгновенно показать на последнем сообщении
         const lastId = (ctxRef?.chat?.length || 0) - 1;
-        if (lastId >= 0) { setMarkerOnMessage(lastId, c.name, val); refreshAll(); }
-        try { toastr?.success?.(`Следующий ответ: ${c.name} = ${val}`, "Полоска-стат"); } catch (e) {}
+        if (lastId >= 0) { setMarkersOnMessage(lastId, items); refreshAll(); }
+        try { toastr?.success?.(`Следующий ответ: ${items.map((i) => `${i.name} = ${i.val}`).join(", ")}`, "Полоска-стат"); } catch (e) {}
     });
 }
 
@@ -464,14 +629,15 @@ function injectStyles() {
     const s = document.createElement("style");
     s.id = "mm-statbar-style";
     s.textContent = `
+      .mm-statbars { display: flex; flex-direction: column; gap: 4px; width: fit-content; max-width: 100%; margin: 3px 0 6px; }
       .mm-statbar {
-        display: flex; align-items: center; gap: 8px;
-        width: fit-content; max-width: 100%;
-        margin: 3px 0 6px; padding: 2px 8px;
+        display: flex; flex-direction: column; gap: 1px;
+        padding: 3px 8px;
         border-radius: 10px; font-size: 0.78em;
         background: color-mix(in srgb, var(--SmartThemeBodyColor) 8%, transparent);
         border: 1px solid var(--SmartThemeBorderColor);
       }
+      .mm-statbar-row { display: flex; align-items: center; gap: 8px; }
       .mm-statbar-name { font-weight: 700; opacity: 0.9; }
       .mm-statbar-track {
         position: relative; width: 120px; max-width: 40vw; height: 8px;
@@ -480,6 +646,10 @@ function injectStyles() {
       }
       .mm-statbar-fill { display:block; height: 100%; border-radius: 999px; transition: width .3s ease, background .3s ease; }
       .mm-statbar-val { font-variant-numeric: tabular-nums; opacity: 0.8; min-width: 2ch; text-align: right; }
+      .mm-statbar-reason {
+        font-size: .92em; font-style: italic; opacity: .6; line-height: 1.3;
+        max-width: min(420px, 60vw); overflow-wrap: anywhere;
+      }
 
       /* Размеры во vh/vw — они всегда от вьюпорта, даже если предок с transform
          делает контейнер нулевой высоты. Центрируем флексом. */
@@ -491,7 +661,7 @@ function injectStyles() {
         background: rgba(0,0,0,0.5);
       }
       #mm-statbar-modal .mm-sb-box {
-        width: min(440px, 92vw); max-height: 88vh; overflow-y: auto;
+        width: min(460px, 92vw); max-height: 88vh; overflow-y: auto;
         background: var(--SmartThemeBlurTintColor); color: var(--SmartThemeBodyColor);
         border: 1px solid var(--SmartThemeBorderColor); border-radius: 12px;
         box-shadow: 0 8px 32px rgba(0,0,0,0.5); padding: 14px 16px;
@@ -506,7 +676,6 @@ function injectStyles() {
       #mm-statbar-modal .mm-sb-row { display:flex; align-items:center; gap:8px; cursor:pointer; margin:2px 0; }
       #mm-statbar-modal .mm-sb-range { display:grid; grid-template-columns:auto 1fr auto 1fr; align-items:center; gap:6px; }
       #mm-statbar-modal .mm-sb-next { display:flex; align-items:center; gap:6px; margin:2px 0; }
-      #mm-statbar-modal .mm-sb-next .menu_button { width:auto; white-space:nowrap; }
       #mm-statbar-modal textarea, #mm-statbar-modal input[type="text"], #mm-statbar-modal input[type="number"] { width:100%; box-sizing:border-box; }
       #mm-statbar-modal .mm-sb-examples { font-size:.8em; opacity:.85; margin:2px 0; display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
       #mm-statbar-modal .mm-sb-ex {
@@ -517,7 +686,22 @@ function injectStyles() {
       #mm-statbar-modal .mm-sb-ex:hover { background: color-mix(in srgb, var(--SmartThemeQuoteColor) 28%, transparent); }
       #mm-statbar-modal .mm-sb-hint { font-size:.78em; opacity:.65; line-height:1.35; margin-top:2px; }
       #mm-statbar-modal .mm-sb-hint code { background: color-mix(in srgb, var(--SmartThemeBodyColor) 15%, transparent); padding:0 4px; border-radius:4px; }
-      #mm-statbar-modal .mm-sb-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:8px; }
+      #mm-statbar-modal .mm-sb-actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; margin-top:8px; }
+      #mm-statbar-modal .mm-sb-actions .menu_button { width:auto; white-space:nowrap; }
+
+      #mm-statbar-modal .mm-sb-cards { display:flex; flex-direction:column; gap:6px; margin-top:4px; }
+      #mm-statbar-modal .mm-sb-card {
+        border:1px solid var(--SmartThemeBorderColor); border-radius:10px; padding:6px 10px;
+        background: color-mix(in srgb, var(--SmartThemeBodyColor) 5%, transparent);
+      }
+      #mm-statbar-modal .mm-sb-cardhead { display:flex; align-items:center; gap:8px; }
+      #mm-statbar-modal .mm-sb-cardtitle { flex:1; margin:0; }
+      #mm-statbar-modal .mm-sb-fold { cursor:pointer; opacity:.6; padding:4px 6px; transition: transform .2s ease; }
+      #mm-statbar-modal .mm-sb-fold:hover { opacity:1; }
+      #mm-statbar-modal .mm-sb-body { display:flex; flex-direction:column; gap:2px; }
+      #mm-statbar-modal .mm-sb-collapsed .mm-sb-body { display:none; }
+      #mm-statbar-modal .mm-sb-collapsed .mm-sb-fold { transform: rotate(-90deg); }
+      #mm-statbar-modal .mm-sb-collapsed .mm-sb-cardname { opacity:.6; }
     `;
     document.head.appendChild(s);
     stylesInjected = true;
@@ -551,10 +735,10 @@ export function initStatBar(ctx) {
         });
     }
 
-    // «Накрутка» одноразовая: после ответа ИИ сбрасываем форс-значение.
+    // «Накрутка» одноразовая: после ответа ИИ сбрасываем форс-значения.
     if (ctxRef?.eventSource && ctxRef?.eventTypes?.MESSAGE_RECEIVED) {
         ctxRef.eventSource.on(ctxRef.eventTypes.MESSAGE_RECEIVED, () => {
-            if (pendingNext != null) { pendingNext = null; updateInjection(); }
+            if (Object.keys(pendingNext).length) { pendingNext = {}; updateInjection(); }
         });
     }
 }
