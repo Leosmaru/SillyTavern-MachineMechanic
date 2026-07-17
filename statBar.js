@@ -299,7 +299,7 @@ function openModal() {
         <label class="mm-sb-row"><input type="checkbox" id="mm-sb-enabled"> <span>Включить полоску</span></label>
         <label class="mm-sb-lbl">Название стата</label>
         <input type="text" id="mm-sb-name" class="text_pole" placeholder="HP / Нервный срыв / Доверие">
-        <label class="mm-sb-lbl">Что это и как меняется (твоя часть промта)</label>
+        <label class="mm-sb-lbl">📝 Промт стата — что это и как меняется (твоя часть)</label>
         <textarea id="mm-sb-meaning" class="text_pole" rows="4" placeholder="Напр.: Физическое здоровье. Раны и усталость снижают, отдых и лечение повышают."></textarea>
         <div class="mm-sb-range">
           <label class="mm-sb-lbl">Мин</label><input type="number" id="mm-sb-min" class="text_pole">
@@ -396,12 +396,17 @@ function injectStyles() {
       .mm-statbar-fill { display:block; height: 100%; border-radius: 999px; transition: width .3s ease, background .3s ease; }
       .mm-statbar-val { font-variant-numeric: tabular-nums; opacity: 0.8; min-width: 2ch; text-align: right; }
 
+      /* Размеры во vh/vw — они всегда от вьюпорта, даже если предок с transform
+         делает контейнер нулевой высоты. Центрируем флексом. */
       #mm-statbar-modal {
-        position: fixed; inset: 0; z-index: 10060; display: flex; align-items: center; justify-content: center;
+        position: fixed; top: 0; left: 0;
+        width: 100vw; height: 100vh;
+        z-index: 10060;
+        display: flex; align-items: center; justify-content: center;
         background: rgba(0,0,0,0.5);
       }
       #mm-statbar-modal .mm-sb-box {
-        width: min(440px, 92vw); max-height: 90vh; overflow-y: auto;
+        width: min(440px, 92vw); max-height: 88vh; overflow-y: auto;
         background: var(--SmartThemeBlurTintColor); color: var(--SmartThemeBodyColor);
         border: 1px solid var(--SmartThemeBorderColor); border-radius: 12px;
         box-shadow: 0 8px 32px rgba(0,0,0,0.5); padding: 14px 16px;
