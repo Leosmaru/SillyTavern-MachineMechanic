@@ -28,19 +28,19 @@ let stylesInjected = false;
 // Готовые примеры (кнопки в попапе подставляют их в поля).
 const EXAMPLES = [
     {
-        name: "HP", min: 0, max: 100,
-        meaning: "Физическое здоровье {{char}}. Раны, удары, усталость, голод и болезни — снижают; отдых, лечение, еда и сон — повышают. " +
-            "Ожидаемое поведение: 80–100 — бодр и полон сил; 40–79 — заметны боль и усталость, действует осторожнее; 15–39 — слаб, двигается с трудом, ошибается; 1–14 — на грани, может терять сознание; 0 — смертельно ранен/без сознания.",
+        name: "Здоровье", min: 0, max: 100,
+        meaning: "Physical health of {{char}}. Wounds, hits, exhaustion, hunger and illness lower it; rest, healing, food and sleep raise it. " +
+            "Expected behavior: 80-100 — energetic and strong; 40-79 — pain and fatigue show, acts more carefully; 15-39 — weak, moves with difficulty, makes mistakes; 1-14 — on the edge, may lose consciousness; 0 — mortally wounded / unconscious.",
     },
     {
         name: "Срыв", min: 0, max: 100,
-        meaning: "Психическая устойчивость {{char}}. Стресс, угрозы, конфликты и страх — снижают; поддержка, безопасность, отдых и близость — повышают. " +
-            "Ожидаемое поведение: 80–100 — спокоен и рассудителен; 40–79 — нервничает, раздражителен; 15–39 — паникует, срывается, слёзы или агрессия; 1–14 — на грани срыва, плохо себя контролирует; 0 — полный нервный срыв, ступор или истерика.",
+        meaning: "Mental stability of {{char}}. Stress, threats, conflict and fear lower it; support, safety, rest and closeness raise it. " +
+            "Expected behavior: 80-100 — calm and level-headed; 40-79 — nervous, irritable; 15-39 — panicking, lashing out, tears or aggression; 1-14 — on the verge of a breakdown, poor self-control; 0 — full breakdown, stupor or hysteria.",
     },
     {
         name: "Доверие", min: 0, max: 100,
-        meaning: "Насколько {{char}} доверяет {{user}}. Честность, помощь и забота — повышают; ложь, угрозы и предательство — снижают. " +
-            "Ожидаемое поведение: 80–100 — открыт, делится секретами, ищет близости; 40–79 — держится дружелюбно, но с осторожностью; 15–39 — насторожен, скрытен, проверяет слова; 1–14 — подозрителен, огрызается, ждёт подвоха; 0 — враждебен, отвергает контакт.",
+        meaning: "How much {{char}} trusts {{user}}. Honesty, help and care raise it; lies, threats and betrayal lower it. " +
+            "Expected behavior: 80-100 — open, shares secrets, seeks closeness; 40-79 — friendly but cautious; 15-39 — wary, secretive, tests words; 1-14 — suspicious, snaps, expects a trick; 0 — hostile, rejects contact.",
     },
 ];
 
@@ -52,7 +52,7 @@ function cfg() {
     if (!s.mm_statBar) {
         s.mm_statBar = {
             enabled: false,
-            name: "HP",
+            name: EXAMPLES[0].name,
             meaning: EXAMPLES[0].meaning,
             min: 0,
             max: 100,
@@ -86,9 +86,11 @@ function colorFor(pct) {
 // Инъекция инструкции модели (inline-режим)
 // ----------------------------------------------------------------------------
 // Сборка полного промта = ФИКС. часть (голова) + твоя часть + ФИКС. часть (хвост).
+// Фикс-часть и примеры — по-английски (надёжнее для модели). Название стата
+// (c.name) остаётся как задал пользователь — обычно русское.
 function buildInjectionText(c) {
-    const head = `[Служебное правило интерфейса] В самом конце ответа, отдельной строкой, выведи текущий показатель «${c.name}» строго в формате [[${c.name}:N]], где N — целое число от ${c.min} до ${c.max}.`;
-    const tail = `Меняй N относительно предыдущего значения (последняя такая метка выше по чату), не сбрасывай к максимуму. Кроме этой одной метки, нигде в тексте про показатель не пиши.`;
+    const head = `[System instruction] At the very end of your reply, on a separate line, output the current "${c.name}" value strictly in the format [[${c.name}:N]], where N is an integer from ${c.min} to ${c.max}.`;
+    const tail = `Change N relative to its previous value (the last such marker earlier in the chat); do not reset it to the maximum. Do not mention this stat anywhere else in the text — only in this single marker.`;
     return `${head} ${String(c.meaning || "").trim()} ${tail}`;
 }
 
@@ -150,8 +152,8 @@ function buildScenePrompt(startId, endId) {
     }
     let scene = parts.join("\n");
     if (scene.length > 12000) scene = scene.slice(scene.length - 12000);
-    return `${scene}\n\n---\nОцени показатель «${c.name}» по этой сцене. ${c.meaning} ` +
-        `Ответь СТРОГО одной строкой в формате [[${c.name}:N]], где N — целое число от ${c.min} до ${c.max}. Больше ничего не пиши.`;
+    return `${scene}\n\n---\nEvaluate the "${c.name}" stat for this scene. ${c.meaning} ` +
+        `Reply with STRICTLY one line in the format [[${c.name}:N]], where N is an integer from ${c.min} to ${c.max}. Write nothing else.`;
 }
 
 async function computeStat(startId, endId) {
@@ -322,8 +324,8 @@ function openModal() {
         <label class="mm-sb-lbl">Название стата</label>
         <input type="text" id="mm-sb-name" class="text_pole" placeholder="HP / Нервный срыв / Доверие">
         <label class="mm-sb-lbl">📝 Промт стата — что это и как меняется (твоя часть)</label>
-        <textarea id="mm-sb-meaning" class="text_pole" rows="4" placeholder="Напр.: Физическое здоровье. Раны и усталость снижают, отдых и лечение повышают."></textarea>
-        <div class="mm-sb-examples">Готовые примеры: <span class="mm-sb-ex" data-ex="0">❤️ HP</span> <span class="mm-sb-ex" data-ex="1">😰 Нервный срыв</span> <span class="mm-sb-ex" data-ex="2">🤝 Доверие</span></div>
+        <textarea id="mm-sb-meaning" class="text_pole" rows="4" placeholder="e.g.: Physical health. Wounds and fatigue lower it, rest and healing raise it. (English works best for the model)"></textarea>
+        <div class="mm-sb-examples">Готовые примеры: <span class="mm-sb-ex" data-ex="0">❤️ Здоровье</span> <span class="mm-sb-ex" data-ex="1">😰 Срыв</span> <span class="mm-sb-ex" data-ex="2">🤝 Доверие</span></div>
         <div class="mm-sb-range">
           <label class="mm-sb-lbl">Мин</label><input type="number" id="mm-sb-min" class="text_pole">
           <label class="mm-sb-lbl">Макс</label><input type="number" id="mm-sb-max" class="text_pole">
