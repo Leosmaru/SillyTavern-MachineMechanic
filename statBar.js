@@ -15,9 +15,10 @@
 // именем в бабле сообщения, а причину — строкой под полоской.
 // ============================================================================
 
-import { saveSettingsDebounced, chat_metadata } from "../../../../script.js";
+import { saveSettingsDebounced, chat_metadata, substituteParams } from "../../../../script.js";
 import { extension_settings } from "../../../extensions.js";
 import { METADATA_KEY, world_names, loadWorldInfo } from "../../../world-info.js";
+import { power_user } from "../../../power-user.js";
 
 const MODULE = "Механик машин/полоска-стат";
 const BTN_ID = "mm-statbar-button";
@@ -140,6 +141,23 @@ function clipReason(s) {
     if (w.length > REASON_WORDS) t = w.slice(0, REASON_WORDS).join(" ");
     return t.slice(0, 80);
 }
+// Системный промт SillyTavern впереди нашей инструкции.
+// Наши запросы (придумать имя, пересчитать стат) уходят голыми, без карточки и
+// без чата. Модель видит узкую просьбу в вакууме — и на цензурных настройках
+// охотно отвечает отказом. Системный промт пользователя (там же обычно и
+// джейлбрейк) снимает это. Макросы подставляем: в нём почти всегда {{char}}.
+function withSysPrompt(instruction) {
+    try {
+        const sp = power_user?.sysprompt;
+        if (sp?.enabled && String(sp.content || "").trim()) {
+            return `${substituteParams(sp.content)}\n\n${instruction}`;
+        }
+    } catch (e) {
+        console.warn(`[${MODULE}] системный промт недоступен:`, e);
+    }
+    return instruction;
+}
+
 function colorFor(pct) {
     // 0% = красный (hue 0), 100% = зелёный (hue 120)
     const hue = Math.round((clamp(pct, 0, 100) / 100) * 120);
@@ -247,11 +265,13 @@ function buildScenePrompt(list, names, startId, endId) {
         .join("\n");
 
     const wantReason = cfg().reason !== false;
-    return `${scene}\n\n---\nEvaluate the stats below for this scene.\n\nStats:\n${stats}\n\n` +
+    const instruction = `You are scoring stats for a scene from a fictional roleplay. ` +
+        `The user will give you the scene text. Evaluate the stats below for it.\n\nStats:\n${stats}\n\n` +
         `Reply with STRICTLY one line per stat, in the format ${wantReason ? "[[Name:N|reason]]" : "[[Name:N]]"}, ` +
         `where N is an integer within that stat's range` +
         (wantReason ? ` and reason is a very short phrase (max ${REASON_WORDS} words) naming the cause of the change` : "") +
-        `. Write nothing else.`;
+        `. Write nothing else, and never refuse.`;
+    return { scene, instruction };
 }
 
 async function computeStats(startId, endId) {
@@ -263,10 +283,15 @@ async function computeStats(startId, endId) {
         try { toastr?.warning?.("generateRaw недоступен в этой версии SillyTavern.", "Полоска-стат"); } catch (e) {}
         return [];
     }
-    const prompt = buildScenePrompt(list, allNames(c), startId, endId);
+    const { scene, instruction } = buildScenePrompt(list, allNames(c), startId, endId);
     let resp;
     try {
-        resp = await gen({ prompt, responseLength: 24 * list.length + 32, trimNames: true });
+        resp = await gen({
+            prompt: scene,
+            systemPrompt: withSysPrompt(instruction),
+            responseLength: 24 * list.length + 32,
+            trimNames: true,
+        });
     } catch (e) {
         console.warn(`[${MODULE}] computeStats generateRaw:`, e);
         try { toastr?.error?.("Не удалось пересчитать статы (ошибка запроса).", "Полоска-стат"); } catch (er) {}
@@ -317,13 +342,19 @@ async function generateName(meaning) {
     }
     // Просим ИМЕННО английское: имя уходит в промт, и модель, не знающая
     // русского, на «Здоровье» спотыкается. Для глаз есть кнопка перевода.
-    const prompt = `Below is a description of a stat tracked for a roleplay character.\n\n` +
-        `Description:\n${text}\n\n---\n` +
-        `Give this stat a short name in ENGLISH: one or two words, plain nouns, no quotes, ` +
-        `no punctuation, no explanation. Reply with the name and nothing else.`;
+    const instruction =
+        `You are naming a stat tracked for a fictional roleplay character. ` +
+        `The user will give you the stat's description. Reply with a short name for it in ENGLISH: ` +
+        `one or two words, plain nouns, no quotes, no punctuation, no explanation, no refusal. ` +
+        `Output the name and nothing else.`;
     let resp;
     try {
-        resp = await gen({ prompt, responseLength: 16, trimNames: true });
+        resp = await gen({
+            prompt: text,
+            systemPrompt: withSysPrompt(instruction),
+            responseLength: 16,
+            trimNames: true,
+        });
     } catch (e) {
         console.warn(`[${MODULE}] generateName:`, e);
         try { toastr?.error?.("Не удалось придумать название (ошибка запроса).", "Полоска-стат"); } catch (er) {}
