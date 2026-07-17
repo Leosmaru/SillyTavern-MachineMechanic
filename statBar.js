@@ -27,9 +27,21 @@ let stylesInjected = false;
 
 // Готовые примеры (кнопки в попапе подставляют их в поля).
 const EXAMPLES = [
-    { name: "HP", min: 0, max: 100, meaning: "Физическое здоровье {{char}}. Раны, удары, усталость, голод и болезни — снижают; отдых, лечение, еда и сон — повышают. 100 = полностью здоров, 0 = при смерти." },
-    { name: "Срыв", min: 0, max: 100, meaning: "Психическая устойчивость {{char}}. Стресс, угрозы, конфликты и страх — снижают; поддержка, безопасность, отдых и близость — повышают. 100 = спокоен и собран, 0 = нервный срыв." },
-    { name: "Доверие", min: 0, max: 100, meaning: "Насколько {{char}} доверяет {{user}}. Честность, помощь и забота — повышают; ложь, угрозы и предательство — снижают. 100 = полное доверие, 0 = враждебность." },
+    {
+        name: "HP", min: 0, max: 100,
+        meaning: "Физическое здоровье {{char}}. Раны, удары, усталость, голод и болезни — снижают; отдых, лечение, еда и сон — повышают. " +
+            "Ожидаемое поведение: 80–100 — бодр и полон сил; 40–79 — заметны боль и усталость, действует осторожнее; 15–39 — слаб, двигается с трудом, ошибается; 1–14 — на грани, может терять сознание; 0 — смертельно ранен/без сознания.",
+    },
+    {
+        name: "Срыв", min: 0, max: 100,
+        meaning: "Психическая устойчивость {{char}}. Стресс, угрозы, конфликты и страх — снижают; поддержка, безопасность, отдых и близость — повышают. " +
+            "Ожидаемое поведение: 80–100 — спокоен и рассудителен; 40–79 — нервничает, раздражителен; 15–39 — паникует, срывается, слёзы или агрессия; 1–14 — на грани срыва, плохо себя контролирует; 0 — полный нервный срыв, ступор или истерика.",
+    },
+    {
+        name: "Доверие", min: 0, max: 100,
+        meaning: "Насколько {{char}} доверяет {{user}}. Честность, помощь и забота — повышают; ложь, угрозы и предательство — снижают. " +
+            "Ожидаемое поведение: 80–100 — открыт, делится секретами, ищет близости; 40–79 — держится дружелюбно, но с осторожностью; 15–39 — насторожен, скрытен, проверяет слова; 1–14 — подозрителен, огрызается, ждёт подвоха; 0 — враждебен, отвергает контакт.",
+    },
 ];
 
 // ----------------------------------------------------------------------------
@@ -73,18 +85,21 @@ function colorFor(pct) {
 // ----------------------------------------------------------------------------
 // Инъекция инструкции модели (inline-режим)
 // ----------------------------------------------------------------------------
+// Сборка полного промта = ФИКС. часть (голова) + твоя часть + ФИКС. часть (хвост).
+function buildInjectionText(c) {
+    const head = `[Служебное правило интерфейса] В самом конце ответа, отдельной строкой, выведи текущий показатель «${c.name}» строго в формате [[${c.name}:N]], где N — целое число от ${c.min} до ${c.max}.`;
+    const tail = `Меняй N относительно предыдущего значения (последняя такая метка выше по чату), не сбрасывай к максимуму. Кроме этой одной метки, нигде в тексте про показатель не пиши.`;
+    return `${head} ${String(c.meaning || "").trim()} ${tail}`;
+}
+
 function updateInjection() {
     const c = cfg();
     const setEP = ctxRef?.setExtensionPrompt || (typeof window !== "undefined" && window.setExtensionPrompt);
     if (typeof setEP !== "function") return;
     try {
         if (!c.enabled || !c.inline) { setEP(INJECT_KEY, ""); return; }
-        const text =
-            `[Служебное правило интерфейса] В самом конце ответа, отдельной строкой, выведи текущий показатель «${c.name}» строго в формате [[${c.name}:N]], где N — целое число от ${c.min} до ${c.max}. ` +
-            `${c.meaning} ` +
-            `Меняй N относительно предыдущего значения (последняя такая метка выше по чату), не сбрасывай к максимуму. Кроме этой одной метки, нигде в тексте про показатель не пиши.`;
         // position 1 = в чат, depth 0 = в самом конце
-        setEP(INJECT_KEY, text, 1, 0, false, 0);
+        setEP(INJECT_KEY, buildInjectionText(c), 1, 0, false, 0);
     } catch (e) {
         console.warn(`[${MODULE}] инъекция:`, e);
     }
@@ -313,6 +328,8 @@ function openModal() {
           <label class="mm-sb-lbl">Мин</label><input type="number" id="mm-sb-min" class="text_pole">
           <label class="mm-sb-lbl">Макс</label><input type="number" id="mm-sb-max" class="text_pole">
         </div>
+        <label class="mm-sb-lbl">👁 Полный промт модели (фикс. часть + твоя, только чтение)</label>
+        <textarea id="mm-sb-preview" class="text_pole" rows="5" readonly></textarea>
         <label class="mm-sb-row"><input type="checkbox" id="mm-sb-inline"> <span>Модель заполняет сама (в каждом ответе)</span></label>
         <label class="mm-sb-row"><input type="checkbox" id="mm-sb-onmem"> <span>Пересчитывать на создании памяти (отдельный AI-запрос по сцене)</span></label>
         <div class="mm-sb-hint">Фиксированную часть промта (формат <code>[[Имя:N]]</code>, диапазон, «меняй от прошлого») модуль добавляет сам. Ты пишешь только смысл.</div>
@@ -332,6 +349,21 @@ function openModal() {
     ov.querySelector("#mm-sb-inline").checked = !!c.inline;
     ov.querySelector("#mm-sb-onmem").checked = !!c.onMemory;
 
+    // Живой предпросмотр полного промта (фикс. + твоя часть).
+    const updatePreview = () => {
+        const pv = ov.querySelector("#mm-sb-preview");
+        if (!pv) return;
+        pv.value = buildInjectionText({
+            name: (ov.querySelector("#mm-sb-name").value || "HP").trim() || "HP",
+            meaning: ov.querySelector("#mm-sb-meaning").value || "",
+            min: parseInt(ov.querySelector("#mm-sb-min").value, 10) || 0,
+            max: parseInt(ov.querySelector("#mm-sb-max").value, 10) || 100,
+        });
+    };
+    ["#mm-sb-name", "#mm-sb-meaning", "#mm-sb-min", "#mm-sb-max"].forEach((sel) =>
+        ov.querySelector(sel)?.addEventListener("input", updatePreview));
+    updatePreview();
+
     const close = () => ov.remove();
     ov.querySelector(".mm-sb-close").addEventListener("click", close);
     ov.querySelector(".mm-sb-cancel").addEventListener("click", close);
@@ -347,6 +379,7 @@ function openModal() {
             ov.querySelector("#mm-sb-min").value = ex.min;
             ov.querySelector("#mm-sb-max").value = ex.max;
             ov.querySelector("#mm-sb-enabled").checked = true;
+            updatePreview();
         });
     });
 
