@@ -25,6 +25,13 @@ let obs = null;
 let obsTimer = null;
 let stylesInjected = false;
 
+// Готовые примеры (кнопки в попапе подставляют их в поля).
+const EXAMPLES = [
+    { name: "HP", min: 0, max: 100, meaning: "Физическое здоровье {{char}}. Раны, удары, усталость, голод и болезни — снижают; отдых, лечение, еда и сон — повышают. 100 = полностью здоров, 0 = при смерти." },
+    { name: "Срыв", min: 0, max: 100, meaning: "Психическая устойчивость {{char}}. Стресс, угрозы, конфликты и страх — снижают; поддержка, безопасность, отдых и близость — повышают. 100 = спокоен и собран, 0 = нервный срыв." },
+    { name: "Доверие", min: 0, max: 100, meaning: "Насколько {{char}} доверяет {{user}}. Честность, помощь и забота — повышают; ложь, угрозы и предательство — снижают. 100 = полное доверие, 0 = враждебность." },
+];
+
 // ----------------------------------------------------------------------------
 // Настройка (в extension_settings.STMemoryBooks.mm_statBar — своя ветка)
 // ----------------------------------------------------------------------------
@@ -34,7 +41,7 @@ function cfg() {
         s.mm_statBar = {
             enabled: false,
             name: "HP",
-            meaning: "Физическое состояние персонажа. Раны, усталость, голод — снижают. Отдых, лечение, еда — повышают.",
+            meaning: EXAMPLES[0].meaning,
             min: 0,
             max: 100,
             inline: true,
@@ -301,6 +308,7 @@ function openModal() {
         <input type="text" id="mm-sb-name" class="text_pole" placeholder="HP / Нервный срыв / Доверие">
         <label class="mm-sb-lbl">📝 Промт стата — что это и как меняется (твоя часть)</label>
         <textarea id="mm-sb-meaning" class="text_pole" rows="4" placeholder="Напр.: Физическое здоровье. Раны и усталость снижают, отдых и лечение повышают."></textarea>
+        <div class="mm-sb-examples">Готовые примеры: <span class="mm-sb-ex" data-ex="0">❤️ HP</span> <span class="mm-sb-ex" data-ex="1">😰 Нервный срыв</span> <span class="mm-sb-ex" data-ex="2">🤝 Доверие</span></div>
         <div class="mm-sb-range">
           <label class="mm-sb-lbl">Мин</label><input type="number" id="mm-sb-min" class="text_pole">
           <label class="mm-sb-lbl">Макс</label><input type="number" id="mm-sb-max" class="text_pole">
@@ -328,6 +336,19 @@ function openModal() {
     ov.querySelector(".mm-sb-close").addEventListener("click", close);
     ov.querySelector(".mm-sb-cancel").addEventListener("click", close);
     ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
+
+    // Кнопки-примеры: подставляют готовый промт в поля (без сохранения).
+    ov.querySelectorAll(".mm-sb-ex").forEach((chip) => {
+        chip.addEventListener("click", () => {
+            const ex = EXAMPLES[parseInt(chip.dataset.ex, 10)];
+            if (!ex) return;
+            ov.querySelector("#mm-sb-name").value = ex.name;
+            ov.querySelector("#mm-sb-meaning").value = ex.meaning;
+            ov.querySelector("#mm-sb-min").value = ex.min;
+            ov.querySelector("#mm-sb-max").value = ex.max;
+            ov.querySelector("#mm-sb-enabled").checked = true;
+        });
+    });
 
     // Пересчитать сейчас — по последней сцене (диапазону памяти) или последним сообщениям.
     ov.querySelector(".mm-sb-recompute").addEventListener("click", async () => {
@@ -421,6 +442,13 @@ function injectStyles() {
       #mm-statbar-modal .mm-sb-row { display:flex; align-items:center; gap:8px; cursor:pointer; margin:2px 0; }
       #mm-statbar-modal .mm-sb-range { display:grid; grid-template-columns:auto 1fr auto 1fr; align-items:center; gap:6px; }
       #mm-statbar-modal textarea, #mm-statbar-modal input[type="text"], #mm-statbar-modal input[type="number"] { width:100%; box-sizing:border-box; }
+      #mm-statbar-modal .mm-sb-examples { font-size:.8em; opacity:.85; margin:2px 0; display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+      #mm-statbar-modal .mm-sb-ex {
+        cursor:pointer; padding:2px 8px; border-radius:999px;
+        border:1px solid var(--SmartThemeBorderColor);
+        background: color-mix(in srgb, var(--SmartThemeQuoteColor) 12%, transparent);
+      }
+      #mm-statbar-modal .mm-sb-ex:hover { background: color-mix(in srgb, var(--SmartThemeQuoteColor) 28%, transparent); }
       #mm-statbar-modal .mm-sb-hint { font-size:.78em; opacity:.65; line-height:1.35; margin-top:2px; }
       #mm-statbar-modal .mm-sb-hint code { background: color-mix(in srgb, var(--SmartThemeBodyColor) 15%, transparent); padding:0 4px; border-radius:4px; }
       #mm-statbar-modal .mm-sb-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:8px; }
