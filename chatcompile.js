@@ -1,6 +1,7 @@
 import { chat, name1, name2 } from '../../../../script.js';
 import { getContext } from '../../../extensions.js';
 import { estimateTokens } from './utils.js';
+import { stripStatMarkers } from './statBar.js';
 import { t as __st_t_tag, translate } from '../../../i18n.js';
 
 /**
@@ -259,7 +260,8 @@ function cleanMessageContent(content, isUser = false) {
     try {
         // Normalize line endings for consistent behavior; do not run Regex engine here.
         const normalized = String(content).replace(/\r\n/g, '\n');
-        return normalized.trim();
+        // Полоски-статы: метки [[Имя:N|причина]] — служебные, в память им нельзя.
+        return stripStatMarkers(normalized).trim();
     } catch (e) {
         return String(content).trim();
     }

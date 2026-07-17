@@ -122,6 +122,15 @@ function stripMarkers(text, names) {
     for (const n of names) t = t.replace(markerRe(n, true), "");
     return t;
 }
+
+// Вычистить метки всех статов из произвольного текста.
+// Нужно на выходе в суммаризацию (chatcompile): иначе [[Имя:N|причина]] попадёт
+// в текст памяти, осядет в лорбуке и вернётся в контекст протухшим числом.
+// Сам чат не трогаем — метки в сообщениях и есть «память» модели о прошлом значении.
+export function stripStatMarkers(text) {
+    if (!text || !String(text).includes("[[")) return text;
+    return stripMarkers(text, allNames(cfg()));
+}
 function clipReason(s) {
     let t = String(s || "").replace(/[\r\n|\]]+/g, " ").replace(/\s+/g, " ").trim();
     const w = t.split(" ").filter(Boolean);
