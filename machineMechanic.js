@@ -15,6 +15,7 @@ import { initChapterNav } from "./chapterNav.js";
 import { initMemoryTuning } from "./memoryTuning.js";
 import { initErrorHints } from "./errorHints.js";
 import { initStatBar } from "./statBar.js";
+import { initSoulDiary } from "./soulDiary.js";
 
 const PANEL_ID = "mm-panel";
 const BUTTON_ID = "mm-wand-button";
@@ -293,5 +294,12 @@ jQuery(() => {
         console.warn("[Механик машин] Не удалось инициализировать полоску-стат:", e);
     }
 
-    console.log("[Механик машин] Готово: 🔧 интерфейс + 🌐 перевод + 🎲 кубик + 🏷️ бейджи + 📖 оглавление.");
+    // Дневник души (🧠): .md-память на чат + смысловой поиск (серверный плагин soul-md).
+    try {
+        initSoulDiary(ctx);
+    } catch (e) {
+        console.warn("[Механик машин] Не удалось инициализировать дневник души:", e);
+    }
+
+    console.log("[Механик машин] Готово: 🔧 интерфейс + 🌐 перевод + 🎲 кубик + 🏷️ бейджи + 📖 оглавление + 🧠 дневник.");
 });
