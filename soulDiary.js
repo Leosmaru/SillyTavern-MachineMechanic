@@ -165,9 +165,10 @@ async function updateMemory() {
 
         // 1) дневник — рефлексия от 1-го лица (дописываем)
         if (cfg().diary) try {
-            const out = await generateQuietPrompt({ quietPrompt: DIARY_PROMPT(recent), skipWIAN: true, responseLength: 200 });
+            const out = await generateQuietPrompt({ quietPrompt: DIARY_PROMPT(recent), skipWIAN: true, responseLength: 400 });
+            console.log("[Дневник души] Diary сырой ответ:", out);
             const text = cleanReflection(out);
-            if (!text) result.fail.push("Diary: пустой ответ модели");
+            if (!text) result.fail.push("Diary: пустой ответ модели (см. F12)");
             else {
                 const saved = await api("append", { chat, date: today(), text });
                 if (saved && saved.ok) result.ok.push("Diary");
@@ -184,10 +185,11 @@ async function updateMemory() {
                 const out = await generateQuietPrompt({
                     quietPrompt: t.build(prev, recent),
                     skipWIAN: true,
-                    responseLength: 220,
+                    responseLength: 400,
                 });
+                console.log(`[Дневник души] ${t.name} сырой ответ:`, out);
                 const text = (out || "").trim();
-                if (!text) { result.fail.push(`${t.name}: пустой ответ модели`); continue; }
+                if (!text) { result.fail.push(`${t.name}: пустой ответ (см. F12)`); continue; }
                 const saved = await api("tracker", { chat, name: t.name, text });
                 if (saved && saved.ok) result.ok.push(t.name);
                 else result.fail.push(`${t.name}: сервер не сохранил (нет маршрута /tracker?)`);
