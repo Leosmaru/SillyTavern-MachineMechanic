@@ -5,7 +5,7 @@
 // (plugins/soul-md/, нужен enableServerPlugins: true в config.yaml).
 //
 // Три дока на чат (кнопка 🧠 рядом с кнопкой полосок — листаются ◄ ►):
-//   • Diary_<дата>.md — дневник: после ответа персонажа дописывается его реплика;
+//   • Diary_<дата>.md — дневник: раз в N ответов модель пишет рефлексию от 1-го лица (стиль Soul of Waifu);
 //   • Psyche.md — «эмоция · цель · напряжение», модель ПЕРЕЗАПИСЫВАЕТ раз в N ответов;
 //   • Status.md — «доверие · динамика · факты о {{user}}», тоже перезапись раз в N.
 //
@@ -121,6 +121,24 @@ ${recent}`,
     },
 ];
 
+// дневник — короткая приватная рефлексия от 1-го лица (стиль Soul of Waifu)
+const DIARY_PROMPT = (recent) =>
+`[System maintenance task — not roleplay. Output ONLY the diary text, nothing else.]
+You are ${name2}. Write a short, PRIVATE diary entry reflecting on the recent conversation with ${name1}.
+You are alone with your own thoughts — you are NOT talking to ${name1}.
+Rules:
+- First person ("I", "me", "my"). Refer to ${name1} in third person.
+- Plain prose only: no asterisks, no actions, no dialogue, no quotation marks, no headers.
+- Strictly 2-4 sentences.
+- Focus on your INTERNAL emotions — how did ${name1} make you feel?
+
+RECENT DIALOGUE:
+${recent}`;
+
+function cleanReflection(s) {
+    return (s || "").replace(/^```[a-z]*\s*|\s*```$/gi, "").trim();
+}
+
 function recentDialogue(n = 6) {
     const list = ctxRef?.chat || [];
     return list.slice(-n)
@@ -128,7 +146,7 @@ function recentDialogue(n = 6) {
         .join("\n");
 }
 
-async function updateTrackers() {
+async function updateMemory() {
     const result = { ok: [], fail: [] };
     if (trackerBusy) return result;
     const chat = chatId();
@@ -141,6 +159,20 @@ async function updateTrackers() {
     internalGen = true; // чтобы наши же хуки не сработали на служебную генерацию
     try {
         const recent = recentDialogue(6);
+
+        // 1) дневник — рефлексия от 1-го лица (дописываем)
+        try {
+            const out = await generateQuietPrompt({ quietPrompt: DIARY_PROMPT(recent), skipWIAN: true, responseLength: 200 });
+            const text = cleanReflection(out);
+            if (!text) result.fail.push("Diary: пустой ответ модели");
+            else {
+                const saved = await api("append", { chat, date: today(), text });
+                if (saved && saved.ok) result.ok.push("Diary");
+                else result.fail.push("Diary: сервер не сохранил");
+            }
+        } catch (e) { result.fail.push(`Diary: ${e?.message || e}`); }
+
+        // 2) трекеры — перезапись
         for (const t of TRACKERS) {
             try {
                 const prevRes = await api("get", { chat, name: t.name });
@@ -246,7 +278,7 @@ async function openViewer() {
             <div class="mm-sd-body"></div>
             <div class="mm-sd-foot">
                 <label class="mm-sd-setrow"><input type="checkbox" class="mm-sd-enabled"> 🧠 Вкл</label>
-                <label class="mm-sd-setrow">Трекеры каждые
+                <label class="mm-sd-setrow">Память каждые
                     <input type="number" class="text_pole mm-sd-every" min="0" max="50" step="1" style="width:58px">
                     ответов <span class="mm-sd-hint">(0 = выкл)</span>
                 </label>
@@ -322,7 +354,7 @@ async function openViewer() {
         const label = runBtn.textContent;
         runBtn.textContent = "Обновляю…";
         try {
-            const r = await updateTrackers();
+            const r = await updateMemory();
             const r2 = await api("docs", { chat });        // подтянуть свежие Psyche/Status
             docs = (r2 && r2.docs) || docs;
             for (const key in trCache) delete trCache[key]; // сбросить кэш перевода
@@ -361,11 +393,9 @@ function hookEvents() {
         const last = list && list[list.length - 1];
         if (!last || last.is_user || !last.mes) return;
 
-        await api("append", { chat, date: today(), text: last.mes });
-
         replyCount++;
         const every = cfg().trackerEvery;
-        if (every > 0 && replyCount % every === 0) updateTrackers(); // фоном, без await
+        if (every > 0 && replyCount % every === 0) updateMemory(); // рефлексия-дневник + трекеры, фоном
     });
 
     if (et.GENERATION_STARTED) {
