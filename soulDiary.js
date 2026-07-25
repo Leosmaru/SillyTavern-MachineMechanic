@@ -37,6 +37,7 @@ const INJECT_KEY = "MM_SOULDIARY";
 function cfg() {
     const s = extension_settings.STMemoryBooks || (extension_settings.STMemoryBooks = {});
     const c = s.mm_soulDiary || (s.mm_soulDiary = {});
+    if (typeof c.enabled !== "boolean") c.enabled = true;      // мастер-выключатель всей 🧠-функции
     if (typeof c.trackerEvery !== "number") c.trackerEvery = 4; // 0 = трекеры выключены
     return c;
 }
@@ -128,9 +129,13 @@ function recentDialogue(n = 6) {
 }
 
 async function updateTrackers() {
-    if (trackerBusy) return;
+    const result = { ok: [], fail: [] };
+    if (trackerBusy) return result;
     const chat = chatId();
-    if (!chat || typeof generateQuietPrompt !== "function") return;
+    if (!chat || typeof generateQuietPrompt !== "function") {
+        result.fail.push("нет чата или генератора");
+        return result;
+    }
 
     trackerBusy = true;
     internalGen = true; // чтобы наши же хуки не сработали на служебную генерацию
@@ -146,15 +151,19 @@ async function updateTrackers() {
                     responseLength: 220,
                 });
                 const text = (out || "").trim();
-                if (text) await api("tracker", { chat, name: t.name, text });
+                if (!text) { result.fail.push(`${t.name}: пустой ответ модели`); continue; }
+                const saved = await api("tracker", { chat, name: t.name, text });
+                if (saved && saved.ok) result.ok.push(t.name);
+                else result.fail.push(`${t.name}: сервер не сохранил (нет маршрута /tracker?)`);
             } catch (e) {
-                console.warn("[Дневник души] трекер", t.name, e);
+                result.fail.push(`${t.name}: ${e?.message || e}`);
             }
         }
     } finally {
         internalGen = false;
         trackerBusy = false;
     }
+    return result;
 }
 
 // ----------------------------------------------------------------------------
@@ -236,6 +245,7 @@ async function openViewer() {
             </div>
             <div class="mm-sd-body"></div>
             <div class="mm-sd-foot">
+                <label class="mm-sd-setrow"><input type="checkbox" class="mm-sd-enabled"> 🧠 Вкл</label>
                 <label class="mm-sd-setrow">Трекеры каждые
                     <input type="number" class="text_pole mm-sd-every" min="0" max="50" step="1" style="width:58px">
                     ответов <span class="mm-sd-hint">(0 = выкл)</span>
@@ -285,6 +295,16 @@ async function openViewer() {
         }),
     );
 
+    // мастер-выключатель всей функции
+    const enBox = ov.querySelector(".mm-sd-enabled");
+    enBox.checked = cfg().enabled;
+    enBox.addEventListener("change", () => {
+        cfg().enabled = enBox.checked;
+        saveSettingsDebounced();
+        if (typeof toastr !== "undefined")
+            toastr.info(enBox.checked ? "Дневник души включён" : "Дневник души выключен", "Дневник души");
+    });
+
     // настройки: интервал трекеров + ручной прогон
     const everyInput = ov.querySelector(".mm-sd-every");
     everyInput.value = String(cfg().trackerEvery);
@@ -302,11 +322,16 @@ async function openViewer() {
         const label = runBtn.textContent;
         runBtn.textContent = "Обновляю…";
         try {
-            await updateTrackers();
+            const r = await updateTrackers();
             const r2 = await api("docs", { chat });        // подтянуть свежие Psyche/Status
             docs = (r2 && r2.docs) || docs;
             for (const key in trCache) delete trCache[key]; // сбросить кэш перевода
             if (i >= docs.length) i = 0;
+            if (typeof toastr !== "undefined") {
+                if (r.ok.length) toastr.success("Обновлено: " + r.ok.join(", "), "Дневник души");
+                if (r.fail.length) toastr.error(r.fail.join("; ") + " — если про /tracker, перезапусти сервер ST.", "Дневник души", { timeOut: 9000 });
+                if (!r.ok.length && !r.fail.length) toastr.info("Нечего обновлять", "Дневник души");
+            }
         } finally {
             runBtn.textContent = label;
             paint();
@@ -329,7 +354,7 @@ function hookEvents() {
 
     const rendered = et.CHARACTER_MESSAGE_RENDERED || et.MESSAGE_RECEIVED;
     es.on(rendered, async () => {
-        if (internalGen) return; // не реагируем на служебные генерации трекеров
+        if (internalGen || !cfg().enabled) return; // выкл или служебная генерация — молчим
         const chat = chatId();
         if (!chat) return;
         const list = ctxRef?.chat;
@@ -346,6 +371,7 @@ function hookEvents() {
     if (et.GENERATION_STARTED) {
         es.on(et.GENERATION_STARTED, async () => {
             if (internalGen) return; // трекеры генерятся тихо — не подмешиваем и не ищем
+            if (!cfg().enabled) { setExtensionPrompt(INJECT_KEY, "", 1, 4); return; }
             const chat = chatId();
             const list = ctxRef?.chat || [];
             const lastUser = [...list].reverse().find((m) => m.is_user);
