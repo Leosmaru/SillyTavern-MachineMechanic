@@ -38,7 +38,10 @@ function cfg() {
     const s = extension_settings.STMemoryBooks || (extension_settings.STMemoryBooks = {});
     const c = s.mm_soulDiary || (s.mm_soulDiary = {});
     if (typeof c.enabled !== "boolean") c.enabled = true;      // мастер-выключатель всей 🧠-функции
-    if (typeof c.trackerEvery !== "number") c.trackerEvery = 4; // 0 = трекеры выключены
+    if (typeof c.trackerEvery !== "number") c.trackerEvery = 4; // 0 = авто-обновление выключено
+    if (typeof c.diary !== "boolean") c.diary = true;   // Дневник
+    if (typeof c.psyche !== "boolean") c.psyche = true; // Эмоции (Psyche)
+    if (typeof c.status !== "boolean") c.status = true; // Отношения (Status)
     return c;
 }
 
@@ -85,7 +88,7 @@ async function yaTranslate(text) {
 // ----------------------------------------------------------------------------
 const TRACKERS = [
     {
-        name: "Psyche",
+        name: "Psyche", flag: "psyche",
         build: (prev, recent) =>
 `[System maintenance task — not roleplay. Output ONLY the note.]
 You maintain a short internal-state note for the character "${name2}".
@@ -102,7 +105,7 @@ RECENT DIALOGUE:
 ${recent}`,
     },
     {
-        name: "Status",
+        name: "Status", flag: "status",
         build: (prev, recent) =>
 `[System maintenance task — not roleplay. Output ONLY the tracker.]
 You maintain a relationship tracker: how "${name2}" currently sees "${name1}".
@@ -161,7 +164,7 @@ async function updateMemory() {
         const recent = recentDialogue(6);
 
         // 1) дневник — рефлексия от 1-го лица (дописываем)
-        try {
+        if (cfg().diary) try {
             const out = await generateQuietPrompt({ quietPrompt: DIARY_PROMPT(recent), skipWIAN: true, responseLength: 200 });
             const text = cleanReflection(out);
             if (!text) result.fail.push("Diary: пустой ответ модели");
@@ -174,6 +177,7 @@ async function updateMemory() {
 
         // 2) трекеры — перезапись
         for (const t of TRACKERS) {
+            if (!cfg()[t.flag]) continue; // док выключен в настройках
             try {
                 const prevRes = await api("get", { chat, name: t.name });
                 const prev = (prevRes && prevRes.text) || "";
@@ -278,6 +282,9 @@ async function openViewer() {
             <div class="mm-sd-body"></div>
             <div class="mm-sd-foot">
                 <label class="mm-sd-setrow"><input type="checkbox" class="mm-sd-enabled"> 🧠 Вкл</label>
+                <label class="mm-sd-setrow"><input type="checkbox" class="mm-sd-diary"> Дневник</label>
+                <label class="mm-sd-setrow"><input type="checkbox" class="mm-sd-psyche"> Эмоции</label>
+                <label class="mm-sd-setrow"><input type="checkbox" class="mm-sd-status"> Отношения</label>
                 <label class="mm-sd-setrow">Память каждые
                     <input type="number" class="text_pole mm-sd-every" min="0" max="50" step="1" style="width:58px">
                     ответов <span class="mm-sd-hint">(0 = выкл)</span>
@@ -337,7 +344,14 @@ async function openViewer() {
             toastr.info(enBox.checked ? "Дневник души включён" : "Дневник души выключен", "Дневник души");
     });
 
-    // настройки: интервал трекеров + ручной прогон
+    // пофайловые тумблеры: Дневник / Эмоции / Отношения
+    for (const [cls, key] of [[".mm-sd-diary", "diary"], [".mm-sd-psyche", "psyche"], [".mm-sd-status", "status"]]) {
+        const box = ov.querySelector(cls);
+        box.checked = cfg()[key];
+        box.addEventListener("change", () => { cfg()[key] = box.checked; saveSettingsDebounced(); });
+    }
+
+    // настройки: интервал обновления памяти + ручной прогон
     const everyInput = ov.querySelector(".mm-sd-every");
     everyInput.value = String(cfg().trackerEvery);
     everyInput.addEventListener("change", () => {
@@ -428,6 +442,11 @@ export function initSoulDiary(ctx) {
     hookEvents();
 
     if (ctxRef?.eventSource && ctxRef?.eventTypes?.CHAT_CHANGED) {
-        ctxRef.eventSource.on(ctxRef.eventTypes.CHAT_CHANGED, () => createButton());
+        ctxRef.eventSource.on(ctxRef.eventTypes.CHAT_CHANGED, () => {
+            createButton();
+            // не тащить память из прошлого чата: чистим инъекцию и счётчик при переключении
+            try { setExtensionPrompt(INJECT_KEY, "", 1, 4); } catch (e) {}
+            replyCount = 0;
+        });
     }
 }
