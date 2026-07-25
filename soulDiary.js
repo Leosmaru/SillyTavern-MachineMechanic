@@ -24,14 +24,22 @@ import {
     setExtensionPrompt,
     getCurrentChatId,
     generateQuietPrompt,
+    saveSettingsDebounced,
     name1,
     name2,
 } from "../../../../script.js";
+import { extension_settings } from "../../../extensions.js";
 
 const API = "/api/plugins/soul-md";
 const BTN_ID = "mm-souldiary-button";
 const INJECT_KEY = "MM_SOULDIARY";
-const TRACKER_EVERY = 4; // обновлять Psyche/Status каждые N ответов персонажа
+// настройки дневника: extension_settings.STMemoryBooks.mm_soulDiary
+function cfg() {
+    const s = extension_settings.STMemoryBooks || (extension_settings.STMemoryBooks = {});
+    const c = s.mm_soulDiary || (s.mm_soulDiary = {});
+    if (typeof c.trackerEvery !== "number") c.trackerEvery = 4; // 0 = трекеры выключены
+    return c;
+}
 
 let ctxRef = null;
 let stylesInjected = false;
@@ -172,7 +180,10 @@ function injectStyles() {
         #mm-souldiary-modal .mm-sd-body { flex: 1; overflow-y: auto; white-space: pre-wrap;
             padding: 10px; border-radius: 8px; background: rgba(255,255,255,.05);
             font-size: .92em; line-height: 1.5; }
-        #mm-souldiary-modal .mm-sd-close { margin-top: 10px; align-self: flex-end; }
+        #mm-souldiary-modal .mm-sd-foot { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+        #mm-souldiary-modal .mm-sd-setrow { display: flex; align-items: center; gap: 6px; font-size: .9em; }
+        #mm-souldiary-modal .mm-sd-hint { opacity: .6; }
+        #mm-souldiary-modal .mm-sd-foot .mm-sd-close { margin-left: auto; }
     `;
     document.head.appendChild(s);
 }
@@ -211,7 +222,7 @@ async function openViewer() {
 
     const chat = chatId();
     const res = chat ? await api("docs", { chat }) : null;
-    const docs = (res && res.docs) || [];
+    let docs = (res && res.docs) || [];
 
     const ov = document.createElement("div");
     ov.id = "mm-souldiary-modal";
@@ -224,8 +235,14 @@ async function openViewer() {
                 <div class="mm-sd-nav" data-nav="1">►</div>
             </div>
             <div class="mm-sd-body"></div>
-            <div class="menu_button mm-sd-close">Закрыть</div>
-        </div>`;
+            <div class="mm-sd-foot">
+                <label class="mm-sd-setrow">Трекеры каждые
+                    <input type="number" class="text_pole mm-sd-every" min="0" max="50" step="1" style="width:58px">
+                    ответов <span class="mm-sd-hint">(0 = выкл)</span>
+                </label>
+                <div class="menu_button mm-sd-run">🔄 Обновить сейчас</div>
+                <div class="menu_button mm-sd-close">Закрыть</div>
+            </div>`;
     document.body.appendChild(ov);
 
     let i = 0;
@@ -267,6 +284,35 @@ async function openViewer() {
             paint();
         }),
     );
+
+    // настройки: интервал трекеров + ручной прогон
+    const everyInput = ov.querySelector(".mm-sd-every");
+    everyInput.value = String(cfg().trackerEvery);
+    everyInput.addEventListener("change", () => {
+        let v = parseInt(everyInput.value, 10);
+        if (!Number.isFinite(v) || v < 0) v = 0;
+        if (v > 50) v = 50;
+        cfg().trackerEvery = v;
+        everyInput.value = String(v);
+        saveSettingsDebounced();
+    });
+    const runBtn = ov.querySelector(".mm-sd-run");
+    runBtn.addEventListener("click", async () => {
+        if (!chat || trackerBusy) return;
+        const label = runBtn.textContent;
+        runBtn.textContent = "Обновляю…";
+        try {
+            await updateTrackers();
+            const r2 = await api("docs", { chat });        // подтянуть свежие Psyche/Status
+            docs = (r2 && r2.docs) || docs;
+            for (const key in trCache) delete trCache[key]; // сбросить кэш перевода
+            if (i >= docs.length) i = 0;
+        } finally {
+            runBtn.textContent = label;
+            paint();
+        }
+    });
+
     const close = () => ov.remove();
     ov.querySelector(".mm-sd-close").addEventListener("click", close);
     ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
@@ -293,7 +339,8 @@ function hookEvents() {
         await api("append", { chat, date: today(), text: last.mes });
 
         replyCount++;
-        if (replyCount % TRACKER_EVERY === 0) updateTrackers(); // фоном, без await
+        const every = cfg().trackerEvery;
+        if (every > 0 && replyCount % every === 0) updateTrackers(); // фоном, без await
     });
 
     if (et.GENERATION_STARTED) {
