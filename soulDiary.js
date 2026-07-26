@@ -1,22 +1,16 @@
 // ============================================================================
 // Механик машин — «Дневник души» (🧠 soulDiary).
 //
-// САМОСТОЯТЕЛЬНАЯ сущность. Работает в паре с серверным плагином soul-md
-// (plugins/soul-md/, нужен enableServerPlugins: true в config.yaml).
+// Память поверх ST в паре с серверным плагином soul-md (plugins/soul-md/,
+// нужен enableServerPlugins: true). Три дока НА ЧАТ (кнопка 🧠 у кнопки полосок):
+//   • Diary_<дата>.md — рефлексия от 1-го лица (append), раз в N ответов;
+//   • Psyche.md / Status.md — «Эмоции» / «Отношения», модель перезаписывает раз в N.
+// Поиск по дневнику перед генерацией → инъекция в промт (родной эмбеддер ST).
+// Всё привязано к getCurrentChatId; удалил чат → /purge стирает его файлы.
 //
-// Три дока на чат (кнопка 🧠 рядом с кнопкой полосок — листаются ◄ ►):
-//   • Diary_<дата>.md — дневник: раз в N ответов модель пишет рефлексию от 1-го лица (стиль Soul of Waifu);
-//   • Psyche.md — «эмоция · цель · напряжение», модель ПЕРЕЗАПИСЫВАЕТ раз в N ответов;
-//   • Status.md — «доверие · динамика · факты о {{user}}», тоже перезапись раз в N.
-//
-// Перед генерацией по дневнику ищется по смыслу нужный кусок (родной эмбеддер ST)
-// и вставляется в промт. Трекеры Psyche/Status в поиск не тянутся.
-//
-// В листалке есть 🌐 — перевод текущего дока через Яндекс. Он НЕ меняет файл,
-// только показывает; закрыл окно — вернулся оригинал.
-//
-// Всё привязано к КОНКРЕТНОМУ ЧАТУ (ключ = getCurrentChatId). Удалил чат в ST —
-// событие CHAT_DELETED/GROUP_CHAT_DELETED -> /purge -> файлы этого чата стёрты.
+// Генерация памяти идёт через generateRaw (чистый промт, без карточки/джейла/пресета).
+// Настройки (⚙): вкл, какие доки писать, интервал, окна захвата, тексты промптов,
+// удаление файлов. Хранятся в extension_settings.STMemoryBooks.mm_soulDiary.
 // ============================================================================
 
 import {
@@ -33,27 +27,96 @@ import { extension_settings } from "../../../extensions.js";
 const API = "/api/plugins/soul-md";
 const BTN_ID = "mm-souldiary-button";
 const INJECT_KEY = "MM_SOULDIARY";
-// настройки дневника: extension_settings.STMemoryBooks.mm_soulDiary
-function cfg() {
-    const s = extension_settings.STMemoryBooks || (extension_settings.STMemoryBooks = {});
-    const c = s.mm_soulDiary || (s.mm_soulDiary = {});
-    if (typeof c.enabled !== "boolean") c.enabled = true;      // мастер-выключатель всей 🧠-функции
-    if (typeof c.trackerEvery !== "number") c.trackerEvery = 4; // 0 = авто-обновление выключено
-    if (typeof c.diary !== "boolean") c.diary = true;   // Дневник
-    if (typeof c.psyche !== "boolean") c.psyche = true; // Эмоции (Psyche)
-    if (typeof c.status !== "boolean") c.status = true; // Отношения (Status)
-    return c;
-}
 
 let ctxRef = null;
 let stylesInjected = false;
 let replyCount = 0;
 let trackerBusy = false;
-let internalGen = false; // true пока идёт служебная генерация трекеров (гасит наши хуки)
+let internalGen = false;
 
 const today = () => new Date().toISOString().slice(0, 10);
 const chatId = () => { try { return getCurrentChatId() || ""; } catch (e) { return ""; } };
 
+// ---------------------------------------------------------------------------
+// Настройки
+// ---------------------------------------------------------------------------
+function cfg() {
+    const s = extension_settings.STMemoryBooks || (extension_settings.STMemoryBooks = {});
+    const c = s.mm_soulDiary || (s.mm_soulDiary = {});
+    if (typeof c.enabled !== "boolean") c.enabled = true;       // мастер-выключатель
+    if (typeof c.diary !== "boolean") c.diary = true;           // Дневник
+    if (typeof c.psyche !== "boolean") c.psyche = true;         // Эмоции
+    if (typeof c.status !== "boolean") c.status = true;         // Отношения
+    if (typeof c.trackerEvery !== "number") c.trackerEvery = 4; // 0 = только вручную
+    if (typeof c.autoWindow !== "number") c.autoWindow = 8;     // окно авто-прогона (сообщений)
+    if (typeof c.deepWindow !== "number") c.deepWindow = 40;    // окно ручного «Обновить»
+    if (typeof c.prompts !== "object" || !c.prompts) c.prompts = {}; // кастомные промпты (пусто = дефолт)
+    return c;
+}
+
+// дефолтные промпты (плейсхолдеры: {{char}} {{user}} {{recent}} {{prev}})
+const DEFAULTS = {
+    diary:
+`You are {{char}}. Write a short, PRIVATE diary entry reflecting on the recent conversation with {{user}}.
+You are alone with your own thoughts — you are NOT talking to {{user}}.
+Rules:
+- First person ("I", "me", "my"). Refer to {{user}} in third person.
+- Plain prose only: no asterisks, no actions, no dialogue, no quotation marks, no headers.
+- Strictly 2-4 sentences.
+- Focus on your INTERNAL emotions — how did {{user}} make you feel?
+
+RECENT DIALOGUE:
+{{recent}}`,
+    psyche:
+`You maintain a short internal-state note for the character "{{char}}".
+Rewrite the ENTIRE note using the recent dialogue and the previous note.
+Output 3-5 short plain-text lines, no preamble, no quotes:
+- Primary emotion + intensity (x/5)
+- What {{char}} secretly wants right now
+- Inner tension or dilemma
+
+PREVIOUS NOTE:
+{{prev}}
+
+RECENT DIALOGUE:
+{{recent}}`,
+    status:
+`You maintain a relationship tracker: how "{{char}}" currently sees "{{user}}".
+Rewrite the ENTIRE tracker using the recent dialogue and the previous version.
+Output short plain-text lines, no preamble:
+- Trust level: Distrustful / Wary / Neutral / Developing Trust / Deeply Bound
+- Current dynamic (one line)
+- Unspoken tension
+- Key facts about {{user}}
+
+PREVIOUS:
+{{prev}}
+
+RECENT DIALOGUE:
+{{recent}}`,
+};
+
+const DOC_RU = { diary: "Дневник", psyche: "Эмоции", status: "Отношения" };
+const TRACKERS = [
+    { name: "Psyche", key: "psyche" },
+    { name: "Status", key: "status" },
+];
+
+function getPrompt(key) {
+    const custom = (cfg().prompts?.[key] || "").trim();
+    return custom || DEFAULTS[key];
+}
+function renderPrompt(tpl, vars) {
+    return String(tpl)
+        .replaceAll("{{char}}", vars.char ?? "")
+        .replaceAll("{{user}}", vars.user ?? "")
+        .replaceAll("{{recent}}", vars.recent ?? "")
+        .replaceAll("{{prev}}", vars.prev ?? "");
+}
+
+// ---------------------------------------------------------------------------
+// Сеть
+// ---------------------------------------------------------------------------
 async function api(route, body) {
     try {
         const r = await fetch(`${API}/${route}`, {
@@ -68,7 +131,6 @@ async function api(route, body) {
     }
 }
 
-// перевод через Яндекс (штатный эндпоинт ST). НЕ пишет никуда — только возвращает текст.
 async function yaTranslate(text) {
     try {
         const r = await fetch("/api/translate/yandex", {
@@ -83,127 +145,67 @@ async function yaTranslate(text) {
     }
 }
 
-// ----------------------------------------------------------------------------
-// Трекеры Psyche / Status — модель переписывает файл целиком
-// ----------------------------------------------------------------------------
-const TRACKERS = [
-    {
-        name: "Psyche", flag: "psyche",
-        build: (prev, recent) =>
-`[System maintenance task — not roleplay. Output ONLY the note.]
-You maintain a short internal-state note for the character "${name2}".
-Rewrite the ENTIRE note using the recent dialogue and the previous note.
-Output 3-5 short plain-text lines, no preamble, no quotes:
-- Primary emotion + intensity (x/5)
-- What ${name2} secretly wants right now
-- Inner tension or dilemma
+const cleanReflection = (s) => (s || "").replace(/^```[a-z]*\s*|\s*```$/gi, "").trim();
 
-PREVIOUS NOTE:
-${prev || "(none yet)"}
-
-RECENT DIALOGUE:
-${recent}`,
-    },
-    {
-        name: "Status", flag: "status",
-        build: (prev, recent) =>
-`[System maintenance task — not roleplay. Output ONLY the tracker.]
-You maintain a relationship tracker: how "${name2}" currently sees "${name1}".
-Rewrite the ENTIRE tracker using the recent dialogue and the previous version.
-Output short plain-text lines, no preamble:
-- Trust level: Distrustful / Wary / Neutral / Developing Trust / Deeply Bound
-- Current dynamic (one line)
-- Unspoken tension
-- Key facts about ${name1}
-
-PREVIOUS:
-${prev || "(none yet)"}
-
-RECENT DIALOGUE:
-${recent}`,
-    },
-];
-
-// дневник — короткая приватная рефлексия от 1-го лица (стиль Soul of Waifu)
-const DIARY_PROMPT = (recent) =>
-`[System maintenance task — not roleplay. Output ONLY the diary text, nothing else.]
-You are ${name2}. Write a short, PRIVATE diary entry reflecting on the recent conversation with ${name1}.
-You are alone with your own thoughts — you are NOT talking to ${name1}.
-Rules:
-- First person ("I", "me", "my"). Refer to ${name1} in third person.
-- Plain prose only: no asterisks, no actions, no dialogue, no quotation marks, no headers.
-- Strictly 2-4 sentences.
-- Focus on your INTERNAL emotions — how did ${name1} make you feel?
-
-RECENT DIALOGUE:
-${recent}`;
-
-function cleanReflection(s) {
-    return (s || "").replace(/^```[a-z]*\s*|\s*```$/gi, "").trim();
-}
-
-// единый вызов модели для памяти: ЧИСТЫЙ промт через generateRaw
-// (без карточки персонажа, чата, джейла и RP-пресета — только наша инструкция)
+// чистая генерация памяти: только наша инструкция, без контекста персонажа
 const MEM_SYS = "You are a precise assistant. Follow the user's instructions exactly and output ONLY the requested text, nothing else. Do not roleplay.";
 async function genMem(promptText) {
     if (typeof generateRaw !== "function") return "";
     return await generateRaw({ prompt: promptText, systemPrompt: MEM_SYS, responseLength: 400 });
 }
 
-function recentDialogue(n = 8, maxChars = 6000) {
+function recentDialogue(n, maxChars = 6000) {
     const list = ctxRef?.chat || [];
-    let text = list.slice(-n)
+    let text = list.slice(-Math.max(1, n))
         .map((m) => `${m.is_user ? name1 : name2}: ${(m.mes || "").trim()}`)
         .join("\n");
-    if (text.length > maxChars) text = "…\n" + text.slice(-maxChars); // защита от гигантского промта
+    if (text.length > maxChars) text = "…\n" + text.slice(-maxChars);
     return text;
 }
 
+// ---------------------------------------------------------------------------
+// Обновление памяти (deep = ручной прогон с большим окном)
+// ---------------------------------------------------------------------------
 async function updateMemory(deep = false) {
     const result = { ok: [], fail: [] };
     if (trackerBusy) return result;
     const chat = chatId();
-    if (!chat || typeof generateRaw !== "function") {
-        result.fail.push("нет чата или генератора");
-        return result;
-    }
+    if (!chat || typeof generateRaw !== "function") { result.fail.push("нет чата или генератора"); return result; }
 
     trackerBusy = true;
-    internalGen = true; // чтобы наши же хуки не сработали на служебную генерацию
+    internalGen = true;
     try {
-        // deep = ручной «Обновить сейчас»: большое окно, чтобы догнать историю.
-        // авто (каждые N ответов) — короткое окно (свежая дельта).
-        const recent = recentDialogue(deep ? 40 : 8);
+        const c = cfg();
+        const recent = recentDialogue(deep ? c.deepWindow : c.autoWindow);
+        const vars = { char: name2, user: name1, recent };
 
-        // 1) дневник — рефлексия от 1-го лица (дописываем)
-        if (cfg().diary) try {
-            const out = await genMem(DIARY_PROMPT(recent));
+        // дневник — рефлексия (append)
+        if (c.diary) try {
+            const out = await genMem(renderPrompt(getPrompt("diary"), vars));
             console.log("[Дневник души] Diary сырой ответ:", out);
             const text = cleanReflection(out);
-            if (!text) result.fail.push("Diary: пустой ответ модели (см. F12)");
+            if (!text) result.fail.push("Дневник: пустой ответ (см. F12)");
             else {
                 const saved = await api("append", { chat, date: today(), text });
-                if (saved && saved.ok) result.ok.push("Diary");
-                else result.fail.push("Diary: сервер не сохранил");
+                if (saved && saved.ok) result.ok.push("Дневник");
+                else result.fail.push("Дневник: сервер не сохранил");
             }
-        } catch (e) { result.fail.push(`Diary: ${e?.message || e}`); }
+        } catch (e) { result.fail.push(`Дневник: ${e?.message || e}`); }
 
-        // 2) трекеры — перезапись
+        // трекеры — перезапись
         for (const t of TRACKERS) {
-            if (!cfg()[t.flag]) continue; // док выключен в настройках
+            if (!c[t.key]) continue;
             try {
                 const prevRes = await api("get", { chat, name: t.name });
                 const prev = (prevRes && prevRes.text) || "";
-                const out = await genMem(t.build(prev, recent));
+                const out = await genMem(renderPrompt(getPrompt(t.key), { ...vars, prev }));
                 console.log(`[Дневник души] ${t.name} сырой ответ:`, out);
                 const text = (out || "").trim();
-                if (!text) { result.fail.push(`${t.name}: пустой ответ (см. F12)`); continue; }
+                if (!text) { result.fail.push(`${DOC_RU[t.key]}: пустой ответ (см. F12)`); continue; }
                 const saved = await api("tracker", { chat, name: t.name, text });
-                if (saved && saved.ok) result.ok.push(t.name);
-                else result.fail.push(`${t.name}: сервер не сохранил (нет маршрута /tracker?)`);
-            } catch (e) {
-                result.fail.push(`${t.name}: ${e?.message || e}`);
-            }
+                if (saved && saved.ok) result.ok.push(DOC_RU[t.key]);
+                else result.fail.push(`${DOC_RU[t.key]}: сервер не сохранил (/tracker?)`);
+            } catch (e) { result.fail.push(`${DOC_RU[t.key]}: ${e?.message || e}`); }
         }
     } finally {
         internalGen = false;
@@ -212,40 +214,47 @@ async function updateMemory(deep = false) {
     return result;
 }
 
-// ----------------------------------------------------------------------------
-// Стили листалки
-// ----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Стили
+// ---------------------------------------------------------------------------
 function injectStyles() {
     if (stylesInjected) return;
     stylesInjected = true;
     const s = document.createElement("style");
     s.textContent = `
-        #mm-souldiary-modal { position: fixed; inset: 0; z-index: 10050; display: flex;
+        .mm-sd-overlay { position: fixed; inset: 0; z-index: 10050; display: flex;
             align-items: center; justify-content: center; background: rgba(0,0,0,.5); }
-        #mm-souldiary-modal .mm-sd-box { width: min(680px, 92vw); max-height: 82vh; display: flex;
-            flex-direction: column; padding: 14px; border-radius: 12px;
-            background: var(--SmartThemeBlurTintColor, #1e1e2a);
+        .mm-sd-box { width: min(680px, 92vw); max-height: 85vh; display: flex; flex-direction: column;
+            padding: 14px; border-radius: 12px; background: var(--SmartThemeBlurTintColor, #1e1e2a);
             border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,.15)); }
-        #mm-souldiary-modal .mm-sd-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-        #mm-souldiary-modal .mm-sd-title { flex: 1; text-align: center; font-weight: 600; }
-        #mm-souldiary-modal .mm-sd-nav,
-        #mm-souldiary-modal .mm-sd-tr { cursor: pointer; padding: 4px 11px; border-radius: 8px; user-select: none;
+        .mm-sd-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+        .mm-sd-title { flex: 1; text-align: center; font-weight: 600; }
+        .mm-sd-nav, .mm-sd-tr { cursor: pointer; padding: 4px 11px; border-radius: 8px; user-select: none;
             border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,.2)); }
-        #mm-souldiary-modal .mm-sd-tr.mm-sd-on { background: var(--SmartThemeQuoteColor, rgba(120,140,255,.35)); }
-        #mm-souldiary-modal .mm-sd-body { flex: 1; overflow-y: auto; white-space: pre-wrap;
-            padding: 10px; border-radius: 8px; background: rgba(255,255,255,.05);
-            font-size: .92em; line-height: 1.5; }
-        #mm-souldiary-modal .mm-sd-foot { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
-        #mm-souldiary-modal .mm-sd-setrow { display: flex; align-items: center; gap: 6px; font-size: .9em; }
-        #mm-souldiary-modal .mm-sd-hint { opacity: .6; }
-        #mm-souldiary-modal .mm-sd-foot .mm-sd-close { margin-left: auto; }
+        .mm-sd-tr.mm-sd-on { background: var(--SmartThemeQuoteColor, rgba(120,140,255,.35)); }
+        .mm-sd-body { flex: 1; overflow-y: auto; white-space: pre-wrap; padding: 10px; border-radius: 8px;
+            background: rgba(255,255,255,.05); font-size: .92em; line-height: 1.5; }
+        .mm-sd-foot { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+        .mm-sd-hint { opacity: .6; font-weight: 400; }
+        .mm-sd-scroll { overflow-y: auto; padding-right: 4px; }
+        .mm-sd-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
+        .mm-sd-row input[type=number] { width: 64px; }
+        .mm-sd-sep { margin: 12px 0 4px; font-weight: 600; opacity: .85;
+            border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,.12)); padding-top: 8px; }
+        .mm-sd-prow { margin: 8px 0; }
+        .mm-sd-plabel { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; }
+        .mm-sd-reset { cursor: pointer; font-size: .8em; opacity: .7; text-decoration: underline; }
+        .mm-sd-ptext { width: 100%; font-size: .85em; font-family: ui-monospace, monospace; }
+        .mm-sd-del { color: var(--warning, #e06c6c); }
+        .mm-sd-edit-area { width: 100%; min-height: 300px; font-family: ui-monospace, monospace; font-size: .88em; }
+        .mm-sd-editbar { display: flex; gap: 8px; margin-top: 8px; }
     `;
     document.head.appendChild(s);
 }
 
-// ----------------------------------------------------------------------------
-// Кнопка 🧠 — сразу за кнопкой полосок-статов
-// ----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Кнопка 🧠
+// ---------------------------------------------------------------------------
 function createButton() {
     if (document.getElementById(BTN_ID)) return;
     const btn = document.createElement("div");
@@ -265,22 +274,104 @@ function createButton() {
     else document.getElementById("leftSendForm")?.appendChild(btn);
 
     const wandOrder = wand ? (parseInt(getComputedStyle(wand).order, 10) || 4) : 4;
-    btn.style.order = String(wandOrder + 4); // у кнопки полосок +3, 🧠 сразу за ней
+    btn.style.order = String(wandOrder + 4);
 }
 
-// ----------------------------------------------------------------------------
-// Листалка .md-доков (◄ ► переключают, 🌐 переводит — не меняя файла)
-// ----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Окно настроек (⚙)
+// ---------------------------------------------------------------------------
+function openSettings(afterClose) {
+    injectStyles();
+    document.getElementById("mm-souldiary-set")?.remove();
+    const c = cfg();
+
+    const ov = document.createElement("div");
+    ov.id = "mm-souldiary-set";
+    ov.className = "mm-sd-overlay";
+    ov.innerHTML = `
+        <div class="mm-sd-box">
+            <div class="mm-sd-title" style="margin-bottom:10px;">🧠 Настройки дневника души</div>
+            <div class="mm-sd-scroll">
+                <label class="mm-sd-row"><input type="checkbox" data-k="enabled"> Включить всю функцию</label>
+                <div class="mm-sd-sep">Что писать</div>
+                <label class="mm-sd-row"><input type="checkbox" data-k="diary"> Дневник (рефлексия)</label>
+                <label class="mm-sd-row"><input type="checkbox" data-k="psyche"> Эмоции</label>
+                <label class="mm-sd-row"><input type="checkbox" data-k="status"> Отношения</label>
+                <div class="mm-sd-sep">Когда и сколько</div>
+                <label class="mm-sd-row">Обновлять каждые <input type="number" data-n="trackerEvery" min="0" max="100"> ответов <span class="mm-sd-hint">(0 = только вручную)</span></label>
+                <label class="mm-sd-row">Окно авто-прогона <input type="number" data-n="autoWindow" min="1" max="200"> сообщений</label>
+                <label class="mm-sd-row">Окно ручного «Обновить» <input type="number" data-n="deepWindow" min="1" max="400"> сообщений</label>
+                <div class="mm-sd-sep">Промпты <span class="mm-sd-hint">плейсхолдеры: {{char}} {{user}} {{recent}} {{prev}}</span></div>
+                ${["diary", "psyche", "status"].map((k) => `
+                    <div class="mm-sd-prow">
+                        <div class="mm-sd-plabel"><b>${DOC_RU[k]}</b><span class="mm-sd-reset" data-r="${k}">сброс к дефолту</span></div>
+                        <textarea class="text_pole mm-sd-ptext" data-p="${k}" rows="5"></textarea>
+                    </div>`).join("")}
+                <div class="mm-sd-sep">Файлы</div>
+                <div class="menu_button mm-sd-del">🗑 Удалить файлы этого чата (создадутся заново)</div>
+            </div>
+            <div class="mm-sd-foot"><div class="menu_button mm-sd-setclose" style="margin-left:auto;">Готово</div></div>
+        </div>`;
+    document.body.appendChild(ov);
+
+    ov.querySelectorAll("[data-k]").forEach((box) => {
+        const k = box.dataset.k;
+        box.checked = !!c[k];
+        box.addEventListener("change", () => { c[k] = box.checked; saveSettingsDebounced(); });
+    });
+    ov.querySelectorAll("[data-n]").forEach((inp) => {
+        const k = inp.dataset.n;
+        inp.value = String(c[k]);
+        inp.addEventListener("change", () => {
+            let v = parseInt(inp.value, 10);
+            if (!Number.isFinite(v)) v = 0;
+            v = Math.max(Number(inp.min) || 0, Math.min(Number(inp.max) || 9999, v));
+            c[k] = v; inp.value = String(v); saveSettingsDebounced();
+        });
+    });
+    ov.querySelectorAll("[data-p]").forEach((ta) => {
+        const k = ta.dataset.p;
+        ta.value = (c.prompts[k] && c.prompts[k].trim()) ? c.prompts[k] : DEFAULTS[k];
+        ta.addEventListener("input", () => {
+            c.prompts[k] = (ta.value.trim() === DEFAULTS[k].trim()) ? "" : ta.value;
+            saveSettingsDebounced();
+        });
+    });
+    ov.querySelectorAll("[data-r]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            const k = btn.dataset.r;
+            const ta = ov.querySelector(`[data-p="${k}"]`);
+            ta.value = DEFAULTS[k];
+            c.prompts[k] = "";
+            saveSettingsDebounced();
+        });
+    });
+    ov.querySelector(".mm-sd-del").addEventListener("click", async () => {
+        const chat = chatId();
+        if (!chat) { if (typeof toastr !== "undefined") toastr.info("Нет активного чата", "Дневник души"); return; }
+        if (!confirm("Удалить дневник и трекеры этого чата? Файлы создадутся заново при следующем обновлении.")) return;
+        await api("purge", { chat });
+        if (typeof toastr !== "undefined") toastr.success("Файлы чата удалены", "Дневник души");
+    });
+
+    const close = () => { ov.remove(); if (typeof afterClose === "function") afterClose(); };
+    ov.querySelector(".mm-sd-setclose").addEventListener("click", close);
+    ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
+}
+
+// ---------------------------------------------------------------------------
+// Листалка доков
+// ---------------------------------------------------------------------------
 async function openViewer() {
     injectStyles();
     document.getElementById("mm-souldiary-modal")?.remove();
 
     const chat = chatId();
-    const res = chat ? await api("docs", { chat }) : null;
-    let docs = (res && res.docs) || [];
+    let docs = chat ? ((await api("docs", { chat }))?.docs || []) : [];
 
     const ov = document.createElement("div");
     ov.id = "mm-souldiary-modal";
+    ov.className = "mm-sd-overlay";
     ov.innerHTML = `
         <div class="mm-sd-box">
             <div class="mm-sd-head">
@@ -291,22 +382,17 @@ async function openViewer() {
             </div>
             <div class="mm-sd-body"></div>
             <div class="mm-sd-foot">
-                <label class="mm-sd-setrow"><input type="checkbox" class="mm-sd-enabled"> 🧠 Вкл</label>
-                <label class="mm-sd-setrow"><input type="checkbox" class="mm-sd-diary"> Дневник</label>
-                <label class="mm-sd-setrow"><input type="checkbox" class="mm-sd-psyche"> Эмоции</label>
-                <label class="mm-sd-setrow"><input type="checkbox" class="mm-sd-status"> Отношения</label>
-                <label class="mm-sd-setrow">Память каждые
-                    <input type="number" class="text_pole mm-sd-every" min="0" max="50" step="1" style="width:58px">
-                    ответов <span class="mm-sd-hint">(0 = выкл)</span>
-                </label>
                 <div class="menu_button mm-sd-run">🔄 Обновить сейчас</div>
-                <div class="menu_button mm-sd-close">Закрыть</div>
-            </div>`;
+                <div class="menu_button mm-sd-edit">✏ Править</div>
+                <div class="menu_button mm-sd-settings">⚙ Настройки</div>
+                <div class="menu_button mm-sd-close" style="margin-left:auto;">Закрыть</div>
+            </div>
+        </div>`;
     document.body.appendChild(ov);
 
     let i = 0;
     let showTr = false;
-    const trCache = {}; // перевод по индексу дока; живёт только пока окно открыто
+    const trCache = {};
     const title = ov.querySelector(".mm-sd-title");
     const body = ov.querySelector(".mm-sd-body");
     const trBtn = ov.querySelector(".mm-sd-tr");
@@ -318,24 +404,23 @@ async function openViewer() {
             return;
         }
         const d = docs[i];
-        title.textContent = docs.length ? `${d.name}  (${i + 1}/${docs.length})` : "Дневник этого чата пуст";
+        title.textContent = docs.length ? `${d.name}  (${i + 1}/${docs.length})` : "Пусто";
         if (!d) {
-            body.textContent = "Пока ничего не записано. Записи появятся после ответов персонажа.";
+            body.textContent = "Пока ничего не записано. Нажми «Обновить сейчас» или дождись авто-прогона.";
             return;
         }
         if (!showTr) { body.textContent = d.text; return; }
-        if (trCache[i] == null) {
-            body.textContent = "Перевод…";
-            trCache[i] = await yaTranslate(d.text);
-        }
-        body.textContent = trCache[i] || d.text; // не удалось перевести — показываем оригинал
+        if (trCache[i] == null) { body.textContent = "Перевод…"; trCache[i] = await yaTranslate(d.text); }
+        body.textContent = trCache[i] || d.text;
+    }
+    async function refreshDocs() {
+        docs = chat ? ((await api("docs", { chat }))?.docs || []) : [];
+        for (const k in trCache) delete trCache[k];
+        if (i >= docs.length) i = 0;
+        paint();
     }
 
-    trBtn.addEventListener("click", () => {
-        showTr = !showTr;
-        trBtn.classList.toggle("mm-sd-on", showTr);
-        paint();
-    });
+    trBtn.addEventListener("click", () => { showTr = !showTr; trBtn.classList.toggle("mm-sd-on", showTr); paint(); });
     ov.querySelectorAll("[data-nav]").forEach((b) =>
         b.addEventListener("click", () => {
             if (!docs.length) return;
@@ -344,55 +429,50 @@ async function openViewer() {
         }),
     );
 
-    // мастер-выключатель всей функции
-    const enBox = ov.querySelector(".mm-sd-enabled");
-    enBox.checked = cfg().enabled;
-    enBox.addEventListener("change", () => {
-        cfg().enabled = enBox.checked;
-        saveSettingsDebounced();
-        if (typeof toastr !== "undefined")
-            toastr.info(enBox.checked ? "Дневник души включён" : "Дневник души выключен", "Дневник души");
-    });
-
-    // пофайловые тумблеры: Дневник / Эмоции / Отношения
-    for (const [cls, key] of [[".mm-sd-diary", "diary"], [".mm-sd-psyche", "psyche"], [".mm-sd-status", "status"]]) {
-        const box = ov.querySelector(cls);
-        box.checked = cfg()[key];
-        box.addEventListener("change", () => { cfg()[key] = box.checked; saveSettingsDebounced(); });
-    }
-
-    // настройки: интервал обновления памяти + ручной прогон
-    const everyInput = ov.querySelector(".mm-sd-every");
-    everyInput.value = String(cfg().trackerEvery);
-    everyInput.addEventListener("change", () => {
-        let v = parseInt(everyInput.value, 10);
-        if (!Number.isFinite(v) || v < 0) v = 0;
-        if (v > 50) v = 50;
-        cfg().trackerEvery = v;
-        everyInput.value = String(v);
-        saveSettingsDebounced();
-    });
     const runBtn = ov.querySelector(".mm-sd-run");
     runBtn.addEventListener("click", async () => {
         if (!chat || trackerBusy) return;
         const label = runBtn.textContent;
         runBtn.textContent = "Обновляю…";
         try {
-            const r = await updateMemory(true); // ручной прогон — глубокое окно
-            const r2 = await api("docs", { chat });        // подтянуть свежие Psyche/Status
-            docs = (r2 && r2.docs) || docs;
-            for (const key in trCache) delete trCache[key]; // сбросить кэш перевода
-            if (i >= docs.length) i = 0;
+            const r = await updateMemory(true);
+            await refreshDocs();
             if (typeof toastr !== "undefined") {
                 if (r.ok.length) toastr.success("Обновлено: " + r.ok.join(", "), "Дневник души");
                 if (r.fail.length) toastr.error(r.fail.join("; ") + " — если про /tracker, перезапусти сервер ST.", "Дневник души", { timeOut: 9000 });
                 if (!r.ok.length && !r.fail.length) toastr.info("Нечего обновлять", "Дневник души");
             }
-        } finally {
-            runBtn.textContent = label;
-            paint();
-        }
+        } finally { runBtn.textContent = label; }
     });
+
+    ov.querySelector(".mm-sd-settings").addEventListener("click", () => openSettings(refreshDocs));
+
+    // правка самой записи (.md) целиком
+    async function startEdit() {
+        if (!chat || !docs.length) return;
+        const d = docs[i];
+        showTr = false; trBtn.classList.remove("mm-sd-on");
+        body.innerHTML = `<textarea class="text_pole mm-sd-edit-area"></textarea>
+            <div class="mm-sd-editbar">
+                <div class="menu_button mm-sd-savedoc">💾 Сохранить</div>
+                <div class="menu_button mm-sd-canceldoc">Отмена</div>
+            </div>`;
+        const ta = body.querySelector(".mm-sd-edit-area");
+        ta.value = d.text;
+        body.querySelector(".mm-sd-canceldoc").addEventListener("click", () => paint());
+        body.querySelector(".mm-sd-savedoc").addEventListener("click", async () => {
+            const saved = await api("save", { chat, name: d.name, text: ta.value });
+            if (saved && saved.ok) {
+                d.text = ta.value;
+                delete trCache[i];
+                if (typeof toastr !== "undefined") toastr.success("Сохранено: " + d.name, "Дневник души");
+                paint();
+            } else if (typeof toastr !== "undefined") {
+                toastr.error("Не сохранилось (сервер?)", "Дневник души");
+            }
+        });
+    }
+    ov.querySelector(".mm-sd-edit").addEventListener("click", startEdit);
 
     const close = () => ov.remove();
     ov.querySelector(".mm-sd-close").addEventListener("click", close);
@@ -400,9 +480,9 @@ async function openViewer() {
     paint();
 }
 
-// ----------------------------------------------------------------------------
-// События: дописать дневник + обновить трекеры после ответа; искать перед генерацией
-// ----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// События
+// ---------------------------------------------------------------------------
 function hookEvents() {
     const es = ctxRef?.eventSource;
     const et = ctxRef?.eventTypes;
@@ -410,21 +490,20 @@ function hookEvents() {
 
     const rendered = et.CHARACTER_MESSAGE_RENDERED || et.MESSAGE_RECEIVED;
     es.on(rendered, async () => {
-        if (internalGen || !cfg().enabled) return; // выкл или служебная генерация — молчим
+        if (internalGen || !cfg().enabled) return;
         const chat = chatId();
         if (!chat) return;
         const list = ctxRef?.chat;
         const last = list && list[list.length - 1];
         if (!last || last.is_user || !last.mes) return;
-
         replyCount++;
         const every = cfg().trackerEvery;
-        if (every > 0 && replyCount % every === 0) updateMemory(); // рефлексия-дневник + трекеры, фоном
+        if (every > 0 && replyCount % every === 0) updateMemory(); // авто, короткое окно
     });
 
     if (et.GENERATION_STARTED) {
         es.on(et.GENERATION_STARTED, async () => {
-            if (internalGen) return; // трекеры генерятся тихо — не подмешиваем и не ищем
+            if (internalGen) return;
             if (!cfg().enabled) { setExtensionPrompt(INJECT_KEY, "", 1, 4); return; }
             const chat = chatId();
             const list = ctxRef?.chat || [];
@@ -436,15 +515,14 @@ function hookEvents() {
         });
     }
 
-    // удаление чата -> снести его дневник (событие даёт id удалённого чата)
     const purge = (deletedChat) => { if (deletedChat) api("purge", { chat: deletedChat }); };
     if (et.CHAT_DELETED) es.on(et.CHAT_DELETED, purge);
     if (et.GROUP_CHAT_DELETED) es.on(et.GROUP_CHAT_DELETED, purge);
 }
 
-// ----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // Точка входа
-// ----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 export function initSoulDiary(ctx) {
     ctxRef = ctx || (typeof SillyTavern !== "undefined" && SillyTavern.getContext ? SillyTavern.getContext() : null);
     injectStyles();
@@ -454,8 +532,7 @@ export function initSoulDiary(ctx) {
     if (ctxRef?.eventSource && ctxRef?.eventTypes?.CHAT_CHANGED) {
         ctxRef.eventSource.on(ctxRef.eventTypes.CHAT_CHANGED, () => {
             createButton();
-            // не тащить память из прошлого чата: чистим инъекцию и счётчик при переключении
-            try { setExtensionPrompt(INJECT_KEY, "", 1, 4); } catch (e) {}
+            try { setExtensionPrompt(INJECT_KEY, "", 1, 4); } catch (e) {} // не тащить память из прошлого чата
             replyCount = 0;
         });
     }
