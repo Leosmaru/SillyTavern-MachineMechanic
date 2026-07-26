@@ -55,6 +55,7 @@ function cfg() {
     if (typeof c.deepWindow !== "number") c.deepWindow = 40;    // окно ручного «Обновить»
     if (typeof c.maxTokens !== "number") c.maxTokens = 800;     // свой лимит токенов на запись памяти
     if (typeof c.maxWords !== "number") c.maxWords = 150;       // лимит длины (слов) — уходит в промт
+    if (typeof c.diaryCount !== "number") c.diaryCount = 3;     // сколько последних записей дневника в промт
     if (typeof c.showSource !== "boolean") c.showSource = true; // тег «откуда взято» под сообщением
     if (typeof c.prompts !== "object" || !c.prompts) c.prompts = {}; // кастомные промпты (пусто = дефолт)
     return c;
@@ -478,6 +479,8 @@ function openSettings(afterClose) {
                 <div class="mm-sd-note">Свой лимит генерации памяти — НЕ берёт основную «max tokens на ответ». Если записи режутся — подними.</div>
                 <label class="mm-sd-row">Лимит длины <input type="number" data-n="maxWords" min="20" max="1000"> слов</label>
                 <div class="mm-sd-note">Уходит в промт («уложись в ~N слов и допиши до конца»), чтобы не обрывалось на полуслове.</div>
+                <label class="mm-sd-row">Записей дневника в промт <input type="number" data-n="diaryCount" min="1" max="20"></label>
+                <div class="mm-sd-note">Сколько последних записей дневника (по времени) подмешивать в контекст. Больше — полнее, но длиннее промт.</div>
                 <div class="mm-sd-sep">Промпты <span class="mm-sd-hint">{{char}} {{user}} {{recent}} {{prev}} · для тем: {{topics}} {{topic}} {{reason}}</span></div>
                 ${["diary", "psyche", "status", "router", "archivist"].map((k) => `
                     <div class="mm-sd-prow">
@@ -758,7 +761,7 @@ function hookEvents() {
             if (!chat || !lastUser?.mes) { setExtensionPrompt(INJECT_KEY, "", 1, 4); return; }
             const question = lastUser.mes;
             const [dq, tq, docsR] = await Promise.all([
-                api("query", { chat, query: question, k: 3 }),
+                api("query", { chat, query: question, k: c.diaryCount || 3 }),
                 c.topics ? api("topics-query", { chat, query: question, k: 3 }) : Promise.resolve(null),
                 (c.psyche || c.status) ? api("docs", { chat }) : Promise.resolve(null),
             ]);
