@@ -47,6 +47,7 @@ function cfg() {
     if (typeof c.diary !== "boolean") c.diary = true;           // Дневник
     if (typeof c.psyche !== "boolean") c.psyche = true;         // Эмоции
     if (typeof c.status !== "boolean") c.status = true;         // Отношения
+    if (typeof c.topics !== "boolean") c.topics = true;         // Факты/темы (Archivist)
     if (typeof c.trackerEvery !== "number") c.trackerEvery = 4; // 0 = только вручную
     if (typeof c.autoWindow !== "number") c.autoWindow = 8;     // окно авто-прогона (сообщений)
     if (typeof c.deepWindow !== "number") c.deepWindow = 40;    // окно ручного «Обновить»
@@ -106,6 +107,27 @@ PREVIOUS:
 
 RECENT DIALOGUE:
 {{recent}}`,
+    router:
+`You track FACT/LORE topics (one per subject: character, place, item, event, backstory).
+From the recent dialogue, decide which topics to create or update. Output ONLY JSON:
+{"topics":[{"name":"short_snake_case","reason":"what changed"}]}
+Empty list if nothing factual changed. Max 3. No prose, no markdown.
+
+EXISTING TOPICS: {{topics}}
+
+RECENT DIALOGUE:
+{{recent}}`,
+    archivist:
+`Write or update ONE factual topic note about "{{topic}}" (reason: {{reason}}).
+Dense plain-text note, under 200 words, third person.
+RESOLVE CONFLICTS: if the recent dialogue contradicts the previous content, OVERWRITE it with the new truth. Prioritize new truths; keep still-valid facts.
+Output ONLY the note text, nothing else.
+
+PREVIOUS CONTENT:
+{{prev}}
+
+RECENT DIALOGUE:
+{{recent}}`,
 };
 
 const DOC_RU = { diary: "Дневник", psyche: "Эмоции", status: "Отношения" };
@@ -123,7 +145,10 @@ function renderPrompt(tpl, vars) {
         .replaceAll("{{char}}", vars.char ?? "")
         .replaceAll("{{user}}", vars.user ?? "")
         .replaceAll("{{recent}}", vars.recent ?? "")
-        .replaceAll("{{prev}}", vars.prev ?? "");
+        .replaceAll("{{prev}}", vars.prev ?? "")
+        .replaceAll("{{topics}}", vars.topics ?? "")
+        .replaceAll("{{topic}}", vars.topic ?? "")
+        .replaceAll("{{reason}}", vars.reason ?? "");
 }
 
 // ---------------------------------------------------------------------------
@@ -178,6 +203,15 @@ function recentDialogue(n, maxChars = 6000) {
 // ---------------------------------------------------------------------------
 // Обновление памяти (deep = ручной прогон с большим окном)
 // ---------------------------------------------------------------------------
+function parseTopics(raw) {
+    try {
+        const m = String(raw || "").match(/\{[\s\S]*\}/);
+        if (!m) return [];
+        const obj = JSON.parse(m[0]);
+        return Array.isArray(obj.topics) ? obj.topics.filter((t) => t && t.name) : [];
+    } catch (e) { return []; }
+}
+
 async function updateMemory(deep = false) {
     const result = { ok: [], fail: [] };
     if (trackerBusy) return result;
@@ -219,6 +253,24 @@ async function updateMemory(deep = false) {
                 else result.fail.push(`${DOC_RU[t.key]}: сервер не сохранил (/tracker?)`);
             } catch (e) { result.fail.push(`${DOC_RU[t.key]}: ${e?.message || e}`); }
         }
+
+        // 3) факты/темы: Router решает какие темы, Archivist перезаписывает по одной (1 файл на тему)
+        if (c.topics) try {
+            const existing = (await api("topics", { chat }))?.topics || [];
+            const names = existing.map((t) => t.name.replace(/\.md$/, "")).join(", ") || "(none)";
+            const plan = parseTopics(await genMem(renderPrompt(getPrompt("router"), { ...vars, topics: names })));
+            for (const act of plan.slice(0, 3)) {
+                try {
+                    const nm = String(act.name).replace(/\.md$/, "");
+                    const prev = existing.find((t) => t.name === nm || t.name === nm + ".md")?.text || "";
+                    const out = await genMem(renderPrompt(getPrompt("archivist"), { ...vars, topic: nm, reason: act.reason || "", prev }));
+                    const text = cleanReflection(out);
+                    if (!text) continue;
+                    const saved = await api("topic-save", { chat, name: nm, text });
+                    if (saved && saved.ok) result.ok.push("Тема:" + nm);
+                } catch (e) { result.fail.push(`Тема: ${e?.message || e}`); }
+            }
+        } catch (e) { result.fail.push(`Темы: ${e?.message || e}`); }
     } finally {
         internalGen = false;
         trackerBusy = false;
@@ -313,6 +365,7 @@ function openSettings(afterClose) {
                 <label class="mm-sd-row"><input type="checkbox" data-k="diary"> Дневник (рефлексия)</label>
                 <label class="mm-sd-row"><input type="checkbox" data-k="psyche"> Эмоции</label>
                 <label class="mm-sd-row"><input type="checkbox" data-k="status"> Отношения</label>
+                <label class="mm-sd-row"><input type="checkbox" data-k="topics"> Факты/темы (лор)</label>
                 <div class="mm-sd-sep">Когда и сколько</div>
                 <label class="mm-sd-row">Обновлять каждые <input type="number" data-n="trackerEvery" min="0" max="100"> ответов</label>
                 <div class="mm-sd-note">Как часто персонаж сам обновляет память по ходу чата. <b>0</b> — не обновлять автоматически, только кнопкой «🔄 Обновить сейчас».</div>
@@ -387,6 +440,10 @@ async function openViewer() {
 
     const chat = chatId();
     let docs = chat ? ((await api("docs", { chat }))?.docs || []) : [];
+    if (chat && cfg().topics) {
+        const tp = (await api("topics", { chat }))?.topics || [];
+        docs = docs.concat(tp.map((t) => ({ name: "topic: " + t.name, text: t.text })));
+    }
 
     const ov = document.createElement("div");
     ov.id = "mm-souldiary-modal";
@@ -434,6 +491,10 @@ async function openViewer() {
     }
     async function refreshDocs() {
         docs = chat ? ((await api("docs", { chat }))?.docs || []) : [];
+        if (chat && cfg().topics) {
+            const tp = (await api("topics", { chat }))?.topics || [];
+            docs = docs.concat(tp.map((t) => ({ name: "topic: " + t.name, text: t.text })));
+        }
         for (const k in trCache) delete trCache[k];
         if (i >= docs.length) i = 0;
         paint();
@@ -480,7 +541,9 @@ async function openViewer() {
         ta.value = d.text;
         body.querySelector(".mm-sd-canceldoc").addEventListener("click", () => paint());
         body.querySelector(".mm-sd-savedoc").addEventListener("click", async () => {
-            const saved = await api("save", { chat, name: d.name, text: ta.value });
+            const saved = d.name.startsWith("topic: ")
+                ? await api("topic-save", { chat, name: d.name.slice(7), text: ta.value })
+                : await api("save", { chat, name: d.name, text: ta.value });
             if (saved && saved.ok) {
                 d.text = ta.value;
                 delete trCache[i];
@@ -528,9 +591,15 @@ function hookEvents() {
             const list = ctxRef?.chat || [];
             const lastUser = [...list].reverse().find((m) => m.is_user);
             if (!chat || !lastUser?.mes) { setExtensionPrompt(INJECT_KEY, "", 1, 4); return; }
-            const q = await api("query", { chat, query: lastUser.mes, k: 3 });
-            const mem = q && q.memory;
-            setExtensionPrompt(INJECT_KEY, mem ? `[Из дневника персонажа]\n${mem}` : "", 1, 4);
+            const question = lastUser.mes;
+            const [dq, tq] = await Promise.all([
+                api("query", { chat, query: question, k: 3 }),
+                cfg().topics ? api("topics-query", { chat, query: question, k: 3 }) : Promise.resolve(null),
+            ]);
+            const blocks = [];
+            if (tq && tq.memory) blocks.push(`[Известные факты]\n${tq.memory}`);
+            if (dq && dq.memory) blocks.push(`[Из дневника персонажа]\n${dq.memory}`);
+            setExtensionPrompt(INJECT_KEY, blocks.join("\n\n"), 1, 4);
         });
     }
 
