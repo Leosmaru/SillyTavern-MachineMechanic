@@ -322,7 +322,9 @@ function injectStyles() {
         .mm-sd-tname { cursor: pointer; flex: 1; word-break: break-word; }
         .mm-sd-trow.mm-sd-off .mm-sd-tname { opacity: .5; text-decoration: line-through; }
         .mm-sd-ic { cursor: pointer; padding: 2px 7px; user-select: none; }
-        .mm-sd-back { cursor: pointer; opacity: .7; margin-bottom: 8px; }
+        .mm-sd-back { cursor: pointer; opacity: .7; }
+        .mm-sd-topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        .mm-sd-ic.mm-sd-on { background: var(--SmartThemeQuoteColor, rgba(120,140,255,.35)); border-radius: 6px; }
     `;
     document.head.appendChild(s);
 }
@@ -388,6 +390,10 @@ function openSettings(afterClose) {
                     </div>`).join("")}
                 <div class="mm-sd-sep">Файлы</div>
                 <div class="menu_button mm-sd-del">🗑 Удалить файлы этого чата (создадутся заново)</div>
+                <div class="mm-sd-sep">Установка сервера (Termux / мобила)</div>
+                <div class="mm-sd-note">Серверная часть не ставится через Update. Скопируй команду → вставь в Termux → перезапусти сервер.</div>
+                <textarea class="text_pole mm-sd-install" readonly rows="4" style="font-family:ui-monospace,monospace;font-size:.78em;width:100%;"></textarea>
+                <div class="menu_button mm-sd-copy" style="margin-top:6px;">📋 Копировать команду установки</div>
             </div>
             <div class="mm-sd-foot"><div class="menu_button mm-sd-setclose" style="margin-left:auto;">Готово</div></div>
         </div>`;
@@ -431,6 +437,19 @@ function openSettings(afterClose) {
         if (!confirm("Удалить дневник и трекеры этого чата? Файлы создадутся заново при следующем обновлении.")) return;
         await api("purge", { chat });
         if (typeof toastr !== "undefined") toastr.success("Файлы чата удалены", "Дневник души");
+    });
+
+    // команда установки серверного плагина для Termux
+    const installCmd = "mkdir -p ~/SillyTavern/plugins/soul-md && curl -o ~/SillyTavern/plugins/soul-md/index.js https://raw.githubusercontent.com/Leosmaru/SillyTavern-MachineMechanic/main/soul-md-server.js && sed -i 's/enableServerPlugins: false/enableServerPlugins: true/' ~/SillyTavern/config.yaml";
+    const inst = ov.querySelector(".mm-sd-install");
+    if (inst) inst.value = installCmd;
+    ov.querySelector(".mm-sd-copy")?.addEventListener("click", async () => {
+        try {
+            await navigator.clipboard.writeText(installCmd);
+            if (typeof toastr !== "undefined") toastr.success("Скопировано — вставь в Termux, потом перезапусти сервер", "Дневник души", { timeOut: 7000 });
+        } catch (e) {
+            if (inst) { inst.focus(); inst.select(); try { document.execCommand("copy"); } catch (_) {} }
+        }
     });
 
     const close = () => { ov.remove(); if (typeof afterClose === "function") afterClose(); };
@@ -512,8 +531,20 @@ async function openViewer() {
     }
     function showTopic(idx) {
         const t = topics[idx];
-        body.innerHTML = '<div class="mm-sd-back">‹ назад к списку</div><div style="white-space:pre-wrap;">' + escapeHtml(t.text) + "</div>";
+        let tr = false, cache = null;
+        body.innerHTML = '<div class="mm-sd-topbar"><span class="mm-sd-back">‹ назад к списку</span>'
+            + '<span class="mm-sd-ic mm-sd-ttr" title="Перевод (Яндекс)">🌐</span></div>'
+            + '<div class="mm-sd-tbody" style="white-space:pre-wrap;"></div>';
+        const tb = body.querySelector(".mm-sd-tbody");
+        const draw = async () => {
+            if (!tr) { tb.textContent = t.text; return; }
+            if (cache == null) { tb.textContent = "Перевод…"; cache = await yaTranslate(t.text); }
+            tb.textContent = cache || t.text;
+        };
         body.querySelector(".mm-sd-back").addEventListener("click", renderTopics);
+        const trb = body.querySelector(".mm-sd-ttr");
+        trb.addEventListener("click", () => { tr = !tr; trb.classList.toggle("mm-sd-on", tr); draw(); });
+        draw();
     }
 
     async function paint() {
