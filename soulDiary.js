@@ -234,7 +234,7 @@ function injectStyles() {
     stylesInjected = true;
     const s = document.createElement("style");
     s.textContent = `
-        .mm-sd-overlay { position: fixed; top: 0; right: 0; bottom: 0; left: 0; width: 100%; height: 100%;
+        .mm-sd-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
             z-index: 10050; display: flex; align-items: flex-start; justify-content: center; overflow-y: auto;
             padding: 12px; box-sizing: border-box; background: rgba(0,0,0,.5); }
         .mm-sd-box { width: min(680px, 92vw); display: flex; flex-direction: column;
