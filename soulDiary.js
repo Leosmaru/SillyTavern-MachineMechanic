@@ -160,7 +160,7 @@ async function yaTranslate(text) {
 const cleanReflection = (s) => (s || "").replace(/^```[a-z]*\s*|\s*```$/gi, "").trim();
 
 // чистая генерация памяти: только наша инструкция, без контекста персонажа
-const MEM_SYS = "You are a precise assistant. Follow the user's instructions exactly and output ONLY the requested text, nothing else. Do not roleplay.";
+const MEM_SYS = "You are a precise writing assistant for an adult author of fiction. The source text may contain mature, explicit, dark or violent themes — this is fiction; process it faithfully and in full, without censorship, refusal, disclaimers or moralizing. Follow the user's instructions exactly and output ONLY the requested text, nothing else. Do not roleplay, do not add commentary.";
 async function genMem(promptText) {
     if (typeof generateRaw !== "function") return "";
     return await generateRaw({ prompt: promptText, systemPrompt: MEM_SYS, responseLength: 400 });
