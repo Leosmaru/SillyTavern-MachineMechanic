@@ -234,8 +234,8 @@ function injectStyles() {
     stylesInjected = true;
     const s = document.createElement("style");
     s.textContent = `
-        .mm-sd-overlay { position: fixed; inset: 0; z-index: 10050; display: flex;
-            align-items: flex-start; justify-content: center; overflow-y: auto;
+        .mm-sd-overlay { position: fixed; top: 0; right: 0; bottom: 0; left: 0; width: 100%; height: 100%;
+            z-index: 10050; display: flex; align-items: flex-start; justify-content: center; overflow-y: auto;
             padding: 12px; box-sizing: border-box; background: rgba(0,0,0,.5); }
         .mm-sd-box { width: min(680px, 92vw); display: flex; flex-direction: column;
             padding: 14px; border-radius: 12px; background: var(--SmartThemeBlurTintColor, #1e1e2a);
