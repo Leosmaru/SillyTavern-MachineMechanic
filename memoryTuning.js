@@ -132,7 +132,9 @@ async function applyModeToLorebook(mode, { silent = false, force = false } = {})
     const name = resolveLorebookNamePassive();
     if (!name) return { changed: 0, noLorebook: true };
 
-    setVectorsWorldInfo(mode === "vector");
+    // Только ВКЛЮЧАЕМ Vector Storage под вектор-режим. В keyword НЕ выключаем —
+    // он мог быть включён под другие лорбуки, глушить его глобально нельзя.
+    if (mode === "vector") setVectorsWorldInfo(true);
 
     let data;
     try {
