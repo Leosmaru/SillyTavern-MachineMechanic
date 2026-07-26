@@ -68,12 +68,21 @@ Rules:
 RECENT DIALOGUE:
 {{recent}}`,
     psyche:
-`You maintain a short internal-state note for the character "{{char}}".
-Rewrite the ENTIRE note using the recent dialogue and the previous note.
-Output 3-5 short plain-text lines, no preamble, no quotes:
+`You maintain {{char}}'s internal psychological state (a cognitive cache).
+Rewrite the ENTIRE note using the recent dialogue and the previous note. Plain text only, no preamble, no quotes.
+
+CORE IDENTITY (3-5 unbreakable beliefs, self-conceptions and fatal flaws of {{char}}):
+- ...
+
+INTERNAL STATE:
 - Primary emotion + intensity (x/5)
-- What {{char}} secretly wants right now
-- Inner tension or dilemma
+- Psychological tension (the inner dilemma right now)
+- Cognitive dissonance (active contradictions {{char}} feels, or "None")
+
+DRIVE:
+- Active agenda (what {{char}} is really after in this conversation — the subtext)
+
+EMOTIONAL DECAY: keep the previous emotion unless the recent dialogue clearly shifts it; if an emotion is no longer supported by recent turns, soften or transition it.
 
 PREVIOUS NOTE:
 {{prev}}
@@ -81,13 +90,16 @@ PREVIOUS NOTE:
 RECENT DIALOGUE:
 {{recent}}`,
     status:
-`You maintain a relationship tracker: how "{{char}}" currently sees "{{user}}".
-Rewrite the ENTIRE tracker using the recent dialogue and the previous version.
-Output short plain-text lines, no preamble:
+`You maintain how "{{char}}" currently sees "{{user}}" (relationship metadata).
+Rewrite the ENTIRE tracker using the recent dialogue and the previous version. Plain text only, no preamble.
+
 - Trust level: Distrustful / Wary / Neutral / Developing Trust / Deeply Bound
-- Current dynamic (one line)
-- Unspoken tension
-- Key facts about {{user}}
+- Current dynamic (how {{char}} perceives {{user}} now)
+- Unspoken tension (what {{char}} hides or secretly hopes for regarding {{user}})
+- Habits & preferences of {{user}} (likes, dislikes, conversational patterns)
+- Milestones & promises (secrets shared, promises made, key events between them)
+
+Keep established facts unless the recent dialogue changes them.
 
 PREVIOUS:
 {{prev}}
