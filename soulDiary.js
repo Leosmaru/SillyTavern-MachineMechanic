@@ -245,11 +245,11 @@ function injectStyles() {
         .mm-sd-nav, .mm-sd-tr { cursor: pointer; padding: 4px 11px; border-radius: 8px; user-select: none;
             border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,.2)); }
         .mm-sd-tr.mm-sd-on { background: var(--SmartThemeQuoteColor, rgba(120,140,255,.35)); }
-        .mm-sd-body { flex: 1; overflow-y: auto; white-space: pre-wrap; padding: 10px; border-radius: 8px;
+        .mm-sd-body { max-height: 60vh; overflow-y: auto; white-space: pre-wrap; padding: 10px; border-radius: 8px;
             background: rgba(255,255,255,.05); font-size: .92em; line-height: 1.5; }
         .mm-sd-foot { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
         .mm-sd-hint { opacity: .6; font-weight: 400; }
-        .mm-sd-scroll { overflow-y: auto; padding-right: 4px; }
+        .mm-sd-scroll { max-height: 66vh; overflow-y: auto; padding-right: 4px; }
         .mm-sd-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
         .mm-sd-row input[type=number] { width: 64px; color: var(--SmartThemeBodyColor, #e9e9f2);
             background: var(--black50a, rgba(0,0,0,.35)); border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,.25));
