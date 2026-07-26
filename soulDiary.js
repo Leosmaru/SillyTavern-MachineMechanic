@@ -235,8 +235,10 @@ function injectStyles() {
     const s = document.createElement("style");
     s.textContent = `
         .mm-sd-overlay { position: fixed; inset: 0; z-index: 10050; display: flex;
-            align-items: center; justify-content: center; background: rgba(0,0,0,.5); }
-        .mm-sd-box { width: min(680px, 92vw); max-height: 85vh; display: flex; flex-direction: column;
+            align-items: flex-start; justify-content: center; overflow-y: auto; padding: 10px;
+            background: rgba(0,0,0,.5); }
+        .mm-sd-box { width: min(680px, 92vw); max-height: 92vh; max-height: calc(100dvh - 20px);
+            margin: auto; display: flex; flex-direction: column;
             padding: 14px; border-radius: 12px; background: var(--SmartThemeBlurTintColor, #1e1e2a);
             border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,.15)); }
         .mm-sd-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
