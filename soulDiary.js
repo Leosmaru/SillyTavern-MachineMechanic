@@ -195,6 +195,8 @@ function renderSourceBadge(id) {
     try {
         const parts = [];
         if (lastInjected.diary) parts.push('<span class="mm-src-t mm-src-d">📔 дневник</span>');
+        if (lastInjected.psyche) parts.push('<span class="mm-src-t mm-src-p">🧠 эмоции</span>');
+        if (lastInjected.status) parts.push('<span class="mm-src-t mm-src-s">❤️ отношения</span>');
         for (const t of lastInjected.topics) parts.push(`<span class="mm-src-t mm-src-f">📚 ${escapeHtml(t)}</span>`);
         lastWI.slice(0, 5).forEach((w) => parts.push(`<span class="mm-src-t mm-src-l">📕 ${escapeHtml(w)}</span>`));
         if (lastWI.length > 5) parts.push(`<span class="mm-src-t mm-src-l">+${lastWI.length - 5}</span>`);
@@ -403,6 +405,8 @@ function injectStyles() {
         .mm-mem-src .mm-src-d { background: rgba(120,140,255,.16); }
         .mm-mem-src .mm-src-f { background: rgba(63,214,198,.16); }
         .mm-mem-src .mm-src-l { background: rgba(232,176,96,.16); }
+        .mm-mem-src .mm-src-p { background: rgba(180,140,255,.16); }
+        .mm-mem-src .mm-src-s { background: rgba(240,123,165,.16); }
         .mm-soul-prog { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; padding: 5px 12px; margin: 0 6px 4px;
             border-radius: 8px; font-size: .78em; background: var(--SmartThemeBlurTintColor, rgba(30,30,42,.92));
             border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,.15)); }
@@ -745,22 +749,29 @@ function hookEvents() {
     if (et.GENERATION_STARTED) {
         es.on(et.GENERATION_STARTED, async () => {
             if (internalGen) return;
-            lastWI = []; lastInjected = { diary: false, topics: [] };
-            if (!cfg().enabled) { setExtensionPrompt(INJECT_KEY, "", 1, 4); return; }
+            lastWI = []; lastInjected = { diary: false, psyche: false, status: false, topics: [] };
+            const c = cfg();
+            if (!c.enabled) { setExtensionPrompt(INJECT_KEY, "", 1, 4); return; }
             const chat = chatId();
             const list = ctxRef?.chat || [];
             const lastUser = [...list].reverse().find((m) => m.is_user);
             if (!chat || !lastUser?.mes) { setExtensionPrompt(INJECT_KEY, "", 1, 4); return; }
             const question = lastUser.mes;
-            const [dq, tq] = await Promise.all([
+            const [dq, tq, docsR] = await Promise.all([
                 api("query", { chat, query: question, k: 3 }),
-                cfg().topics ? api("topics-query", { chat, query: question, k: 3 }) : Promise.resolve(null),
+                c.topics ? api("topics-query", { chat, query: question, k: 3 }) : Promise.resolve(null),
+                (c.psyche || c.status) ? api("docs", { chat }) : Promise.resolve(null),
             ]);
+            const docs = (docsR && docsR.docs) || [];
+            const psyche = c.psyche ? (docs.find((d) => d.name === "Psyche.md")?.text || "") : "";
+            const status = c.status ? (docs.find((d) => d.name === "Status.md")?.text || "") : "";
             const blocks = [];
+            if (psyche) blocks.push(`[Текущее состояние ${name2}]\n${psyche}`);
+            if (status) blocks.push(`[Отношение к ${name1}]\n${status}`);
             if (tq && tq.memory) blocks.push(`[Известные факты]\n${tq.memory}`);
             if (dq && dq.memory) blocks.push(`[Из дневника персонажа]\n${dq.memory}`);
             setExtensionPrompt(INJECT_KEY, blocks.join("\n\n"), 1, 4);
-            lastInjected = { diary: !!(dq && dq.memory), topics: (tq && tq.used) || [] };
+            lastInjected = { diary: !!(dq && dq.memory), psyche: !!psyche, status: !!status, topics: (tq && tq.used) || [] };
         });
     }
 
