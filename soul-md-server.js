@@ -174,7 +174,8 @@ async function init(router) {
             const qv = await embed(query);
             for (const it of items) it.s = dot(qv, await embed(it.t.slice(0, 1000)));
             items.sort((a, b) => b.s - a.s);
-            res.json({ memory: items.slice(0, Math.max(1, k)).map(x => x.t).join('\n\n') });
+            const top = items.slice(0, Math.max(1, k));
+            res.json({ memory: top.map(x => x.t).join('\n\n'), used: top.map(x => x.n.replace(/\.md$/, '')) });
         } catch (e) { res.status(500).json({ memory: '', error: String(e) }); }
     });
 
