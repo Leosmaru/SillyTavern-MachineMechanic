@@ -167,8 +167,10 @@ async function applyModeToLorebook(mode, { silent = false, force = false } = {})
             }
         } else {
             const cleaned = cleanKeywords(entry.mm_savedKeys);
-            if (entry.mm_mode !== "keyword" || !arraysEqual(entry.key, cleaned)) {
+            if (entry.mm_mode !== "keyword" || entry.vectorized || !arraysEqual(entry.key, cleaned)) {
                 entry.key = cleaned;
+                entry.vectorized = false; // ВАЖНО: снять вектор-флаг, иначе запись мёртвая без Vector Storage
+                entry.constant = false;
                 entry.mm_mode = "keyword";
                 changed++;
             }
