@@ -51,6 +51,7 @@ function cfg() {
     if (typeof c.status !== "boolean") c.status = true;         // Отношения
     if (typeof c.topics !== "boolean") c.topics = true;         // Факты/темы (Archivist)
     if (typeof c.trackerEvery !== "number") c.trackerEvery = 4; // 0 = только вручную
+    if (typeof c.askBeforeAuto !== "boolean") c.askBeforeAuto = true; // спрашивать перед авто-обновлением
     if (typeof c.autoWindow !== "number") c.autoWindow = 8;     // окно авто-прогона (сообщений)
     if (typeof c.deepWindow !== "number") c.deepWindow = 40;    // окно ручного «Обновить»
     if (typeof c.maxTokens !== "number") c.maxTokens = 800;     // свой лимит токенов на запись памяти
@@ -268,6 +269,26 @@ function progDone() {
     setTimeout(() => { const x = document.getElementById("mm-soul-prog"); if (x) x.style.display = "none"; }, 2500);
 }
 
+// запрос «обновлять дневник души?» перед авто-прогоном
+let askPending = false;
+function askUpdate() {
+    if (askPending || trackerBusy) return;
+    askPending = true;
+    document.getElementById("mm-soul-ask")?.remove();
+    const b = document.createElement("div");
+    b.id = "mm-soul-ask";
+    b.className = "mm-soul-prog mm-soul-ask";
+    b.innerHTML = '<span class="mm-sp-title">🧠 Обновить дневник души?</span>'
+        + '<span class="menu_button mm-ask-yes">Да</span>'
+        + '<span class="menu_button mm-ask-no">Нет</span>';
+    const sf = document.getElementById("send_form");
+    if (sf && sf.parentElement) sf.parentElement.insertBefore(b, sf);
+    else document.body.appendChild(b);
+    const done = () => { askPending = false; b.remove(); };
+    b.querySelector(".mm-ask-yes").addEventListener("click", () => { done(); updateMemory(); });
+    b.querySelector(".mm-ask-no").addEventListener("click", done);
+}
+
 function parseTopics(raw) {
     try {
         const m = String(raw || "").match(/\{[\s\S]*\}/);
@@ -416,6 +437,7 @@ function injectStyles() {
         .mm-soul-prog .mm-sp-item.run { opacity: 1; }
         .mm-soul-prog .mm-sp-item.done { color: var(--ok, #6bc98a); opacity: 1; }
         .mm-soul-prog .mm-sp-item.fail { color: var(--warning, #e06c6c); opacity: 1; }
+        .mm-soul-ask .menu_button { padding: 2px 14px; margin: 0; }
     `;
     document.head.appendChild(s);
 }
@@ -470,6 +492,8 @@ function openSettings(afterClose) {
                 <div class="mm-sd-sep">Когда и сколько</div>
                 <label class="mm-sd-row">Обновлять каждые <input type="number" data-n="trackerEvery" min="0" max="100"> ответов</label>
                 <div class="mm-sd-note">Как часто персонаж сам обновляет память по ходу чата. <b>0</b> — не обновлять автоматически, только кнопкой «🔄 Обновить сейчас».</div>
+                <label class="mm-sd-row"><input type="checkbox" data-k="askBeforeAuto"> Спрашивать перед авто-обновлением</label>
+                <div class="mm-sd-note">Перед авто-прогоном над полем ввода появится «🧠 Обновить дневник души? Да / Нет». Ручная кнопка «🔄 Обновить сейчас» спрашивать не будет.</div>
                 <label class="mm-sd-row">Окно авто-прогона <input type="number" data-n="autoWindow" min="1" max="200"> сообщений</label>
                 <div class="mm-sd-note">Сколько последних сообщений берётся при авто-обновлении. Больше — полнее, но дороже по токенам.</div>
                 <label class="mm-sd-row">Окно ручного «Обновить» <input type="number" data-n="deepWindow" min="1" max="400"> сообщений</label>
@@ -746,7 +770,10 @@ function hookEvents() {
         if (!last || last.is_user || !last.mes) return;
         replyCount++;
         const every = cfg().trackerEvery;
-        if (every > 0 && replyCount % every === 0) updateMemory(); // авто, короткое окно
+        if (every > 0 && replyCount % every === 0) {
+            if (cfg().askBeforeAuto) askUpdate();  // спросить перед авто-прогоном
+            else updateMemory();                    // авто, короткое окно
+        }
     });
 
     if (et.GENERATION_STARTED) {
@@ -805,6 +832,7 @@ export function initSoulDiary(ctx) {
         ctxRef.eventSource.on(ctxRef.eventTypes.CHAT_CHANGED, () => {
             createButton();
             try { setExtensionPrompt(INJECT_KEY, "", 1, 4); } catch (e) {} // не тащить память из прошлого чата
+            document.getElementById("mm-soul-ask")?.remove(); askPending = false; // убрать зависший запрос
             replyCount = 0;
         });
     }
