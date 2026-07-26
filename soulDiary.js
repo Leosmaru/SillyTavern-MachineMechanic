@@ -238,7 +238,10 @@ function injectStyles() {
         .mm-sd-hint { opacity: .6; font-weight: 400; }
         .mm-sd-scroll { overflow-y: auto; padding-right: 4px; }
         .mm-sd-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
-        .mm-sd-row input[type=number] { width: 64px; }
+        .mm-sd-row input[type=number] { width: 64px; color: var(--SmartThemeBodyColor, #e9e9f2);
+            background: var(--black50a, rgba(0,0,0,.35)); border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,.25));
+            border-radius: 6px; padding: 3px 6px; }
+        .mm-sd-note { font-size: .8em; opacity: .62; margin: -2px 0 9px 2px; line-height: 1.35; }
         .mm-sd-sep { margin: 12px 0 4px; font-weight: 600; opacity: .85;
             border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,.12)); padding-top: 8px; }
         .mm-sd-prow { margin: 8px 0; }
@@ -298,9 +301,12 @@ function openSettings(afterClose) {
                 <label class="mm-sd-row"><input type="checkbox" data-k="psyche"> Эмоции</label>
                 <label class="mm-sd-row"><input type="checkbox" data-k="status"> Отношения</label>
                 <div class="mm-sd-sep">Когда и сколько</div>
-                <label class="mm-sd-row">Обновлять каждые <input type="number" data-n="trackerEvery" min="0" max="100"> ответов <span class="mm-sd-hint">(0 = только вручную)</span></label>
+                <label class="mm-sd-row">Обновлять каждые <input type="number" data-n="trackerEvery" min="0" max="100"> ответов</label>
+                <div class="mm-sd-note">Как часто персонаж сам обновляет память по ходу чата. <b>0</b> — не обновлять автоматически, только кнопкой «🔄 Обновить сейчас».</div>
                 <label class="mm-sd-row">Окно авто-прогона <input type="number" data-n="autoWindow" min="1" max="200"> сообщений</label>
+                <div class="mm-sd-note">Сколько последних сообщений берётся при авто-обновлении. Больше — полнее, но дороже по токенам.</div>
                 <label class="mm-sd-row">Окно ручного «Обновить» <input type="number" data-n="deepWindow" min="1" max="400"> сообщений</label>
+                <div class="mm-sd-note">Сколько последних сообщений берёт кнопка «🔄 Обновить сейчас» — чтобы догнать историю, если включил плагин поздно.</div>
                 <div class="mm-sd-sep">Промпты <span class="mm-sd-hint">плейсхолдеры: {{char}} {{user}} {{recent}} {{prev}}</span></div>
                 ${["diary", "psyche", "status"].map((k) => `
                     <div class="mm-sd-prow">
