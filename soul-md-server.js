@@ -138,8 +138,12 @@ async function init(router) {
         try {
             const dir = topicsDir((req.body || {}).chat);
             if (!dir || !fs.existsSync(dir)) return res.json({ topics: [] });
-            const topics = fs.readdirSync(dir).filter(n => n.endsWith('.md'))
-                .map(n => ({ name: n, text: fs.readFileSync(path.join(dir, n), 'utf-8') }));
+            const topics = fs.readdirSync(dir).filter(n => n.endsWith('.md') || n.endsWith('.md.off'))
+                .map(n => {
+                    const off = n.endsWith('.off');
+                    const base = off ? n.slice(0, -4) : n; // убрать .off
+                    return { name: base, text: fs.readFileSync(path.join(dir, n), 'utf-8'), off };
+                });
             res.json({ topics });
         } catch (e) { res.status(500).json({ topics: [], error: String(e) }); }
     });
@@ -172,6 +176,32 @@ async function init(router) {
             items.sort((a, b) => b.s - a.s);
             res.json({ memory: items.slice(0, Math.max(1, k)).map(x => x.t).join('\n\n') });
         } catch (e) { res.status(500).json({ memory: '', error: String(e) }); }
+    });
+
+    // удалить одну тему
+    router.post('/topic-delete', (req, res) => {
+        try {
+            const { chat, name } = req.body || {};
+            const dir = topicsDir(chat); const fn = topFile(name);
+            if (dir && fn) {
+                for (const p of [path.join(dir, fn), path.join(dir, fn + '.off')])
+                    if (fs.existsSync(p)) fs.unlinkSync(p);
+            }
+            res.json({ ok: true });
+        } catch (e) { res.status(500).json({ ok: false, error: String(e) }); }
+    });
+
+    // исключить/вернуть тему (переименование .md <-> .md.off; в поиск идут только .md)
+    router.post('/topic-exclude', (req, res) => {
+        try {
+            const { chat, name, off } = req.body || {};
+            const dir = topicsDir(chat); const fn = topFile(name);
+            if (!dir || !fn) return res.json({ ok: false });
+            const active = path.join(dir, fn), disabled = active + '.off';
+            if (off && fs.existsSync(active)) fs.renameSync(active, disabled);
+            else if (!off && fs.existsSync(disabled)) fs.renameSync(disabled, active);
+            res.json({ ok: true });
+        } catch (e) { res.status(500).json({ ok: false, error: String(e) }); }
     });
 
     // 6) УДАЛИТЬ дневник чата целиком (вызывается при удалении чата в ST)
