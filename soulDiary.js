@@ -23,7 +23,7 @@ import {
     getRequestHeaders,
     setExtensionPrompt,
     getCurrentChatId,
-    generateQuietPrompt,
+    generateRaw,
     saveSettingsDebounced,
     name1,
     name2,
@@ -142,6 +142,14 @@ function cleanReflection(s) {
     return (s || "").replace(/^```[a-z]*\s*|\s*```$/gi, "").trim();
 }
 
+// единый вызов модели для памяти: ЧИСТЫЙ промт через generateRaw
+// (без карточки персонажа, чата, джейла и RP-пресета — только наша инструкция)
+const MEM_SYS = "You are a precise assistant. Follow the user's instructions exactly and output ONLY the requested text, nothing else. Do not roleplay.";
+async function genMem(promptText) {
+    if (typeof generateRaw !== "function") return "";
+    return await generateRaw({ prompt: promptText, systemPrompt: MEM_SYS, responseLength: 400 });
+}
+
 function recentDialogue(n = 6) {
     const list = ctxRef?.chat || [];
     return list.slice(-n)
@@ -153,7 +161,7 @@ async function updateMemory() {
     const result = { ok: [], fail: [] };
     if (trackerBusy) return result;
     const chat = chatId();
-    if (!chat || typeof generateQuietPrompt !== "function") {
+    if (!chat || typeof generateRaw !== "function") {
         result.fail.push("нет чата или генератора");
         return result;
     }
@@ -165,7 +173,7 @@ async function updateMemory() {
 
         // 1) дневник — рефлексия от 1-го лица (дописываем)
         if (cfg().diary) try {
-            const out = await generateQuietPrompt({ quietPrompt: DIARY_PROMPT(recent), skipWIAN: true, responseLength: 400 });
+            const out = await genMem(DIARY_PROMPT(recent));
             console.log("[Дневник души] Diary сырой ответ:", out);
             const text = cleanReflection(out);
             if (!text) result.fail.push("Diary: пустой ответ модели (см. F12)");
@@ -182,11 +190,7 @@ async function updateMemory() {
             try {
                 const prevRes = await api("get", { chat, name: t.name });
                 const prev = (prevRes && prevRes.text) || "";
-                const out = await generateQuietPrompt({
-                    quietPrompt: t.build(prev, recent),
-                    skipWIAN: true,
-                    responseLength: 400,
-                });
+                const out = await genMem(t.build(prev, recent));
                 console.log(`[Дневник души] ${t.name} сырой ответ:`, out);
                 const text = (out || "").trim();
                 if (!text) { result.fail.push(`${t.name}: пустой ответ (см. F12)`); continue; }
