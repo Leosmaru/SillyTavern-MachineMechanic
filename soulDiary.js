@@ -135,7 +135,7 @@ RECENT DIALOGUE:
 {{recent}}`,
 };
 
-const DOC_RU = { diary: "Дневник", psyche: "Эмоции", status: "Отношения" };
+const DOC_RU = { diary: "Дневник", psyche: "Эмоции", status: "Отношения", router: "Темы · выбор (Router)", archivist: "Темы · запись (Archivist)" };
 const TRACKERS = [
     { name: "Psyche", key: "psyche" },
     { name: "Status", key: "status" },
@@ -420,8 +420,8 @@ function openSettings(afterClose) {
                 <div class="mm-sd-note">Свой лимит генерации памяти — НЕ берёт основную «max tokens на ответ». Если записи режутся — подними.</div>
                 <label class="mm-sd-row">Лимит длины <input type="number" data-n="maxWords" min="20" max="1000"> слов</label>
                 <div class="mm-sd-note">Уходит в промт («уложись в ~N слов и допиши до конца»), чтобы не обрывалось на полуслове.</div>
-                <div class="mm-sd-sep">Промпты <span class="mm-sd-hint">плейсхолдеры: {{char}} {{user}} {{recent}} {{prev}}</span></div>
-                ${["diary", "psyche", "status"].map((k) => `
+                <div class="mm-sd-sep">Промпты <span class="mm-sd-hint">{{char}} {{user}} {{recent}} {{prev}} · для тем: {{topics}} {{topic}} {{reason}}</span></div>
+                ${["diary", "psyche", "status", "router", "archivist"].map((k) => `
                     <div class="mm-sd-prow">
                         <div class="mm-sd-plabel"><b>${DOC_RU[k]}</b><span class="mm-sd-reset" data-r="${k}">сброс к дефолту</span></div>
                         <textarea class="text_pole mm-sd-ptext" data-p="${k}" rows="5"></textarea>
