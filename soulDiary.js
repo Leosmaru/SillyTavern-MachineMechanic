@@ -196,7 +196,8 @@ function renderSourceBadge(id) {
         const parts = [];
         if (lastInjected.diary) parts.push('<span class="mm-src-t mm-src-d">📔 дневник</span>');
         for (const t of lastInjected.topics) parts.push(`<span class="mm-src-t mm-src-f">📚 ${escapeHtml(t)}</span>`);
-        for (const w of lastWI) parts.push(`<span class="mm-src-t mm-src-l">📕 ${escapeHtml(w)}</span>`);
+        lastWI.slice(0, 5).forEach((w) => parts.push(`<span class="mm-src-t mm-src-l">📕 ${escapeHtml(w)}</span>`));
+        if (lastWI.length > 5) parts.push(`<span class="mm-src-t mm-src-l">+${lastWI.length - 5}</span>`);
         if (!parts.length) return;
         const mesEl = document.querySelector(`#chat .mes[mesid="${id}"]`) || [...document.querySelectorAll("#chat .mes")].pop();
         if (!mesEl) return;
@@ -230,6 +231,40 @@ function recentDialogue(n, maxChars = 6000) {
 // ---------------------------------------------------------------------------
 // Обновление памяти (deep = ручной прогон с большим окном)
 // ---------------------------------------------------------------------------
+// индикатор «формирование души» над полем ввода
+const PROG_RU = { diary: "📔 Дневник", psyche: "🧠 Эмоции", status: "❤️ Отношения", topics: "📚 Темы" };
+function progBar() {
+    let b = document.getElementById("mm-soul-prog");
+    if (b) return b;
+    b = document.createElement("div");
+    b.id = "mm-soul-prog";
+    b.className = "mm-soul-prog";
+    const sf = document.getElementById("send_form");
+    if (sf && sf.parentElement) sf.parentElement.insertBefore(b, sf);
+    else document.body.appendChild(b);
+    return b;
+}
+function progInit(keys) {
+    const b = progBar();
+    b.style.display = "flex";
+    b.innerHTML = '<span class="mm-sp-title">🧠 Формирование души…</span>'
+        + keys.map((k) => `<span class="mm-sp-item" data-k="${k}">${PROG_RU[k]} ⏳</span>`).join("");
+}
+function progSet(k, status) {
+    const el = document.querySelector(`#mm-soul-prog .mm-sp-item[data-k="${k}"]`);
+    if (!el) return;
+    el.className = "mm-sp-item " + status;
+    const icon = { run: "🔄", done: "✅", fail: "✖" }[status] || "⏳";
+    el.textContent = `${PROG_RU[k]} ${icon}`;
+}
+function progDone() {
+    const b = document.getElementById("mm-soul-prog");
+    if (!b) return;
+    const t = b.querySelector(".mm-sp-title");
+    if (t) t.textContent = "🧠 Душа обновлена";
+    setTimeout(() => { const x = document.getElementById("mm-soul-prog"); if (x) x.style.display = "none"; }, 2500);
+}
+
 function parseTopics(raw) {
     try {
         const m = String(raw || "").match(/\{[\s\S]*\}/);
@@ -252,37 +287,46 @@ async function updateMemory(deep = false) {
         const recent = recentDialogue(deep ? c.deepWindow : c.autoWindow);
         const vars = { char: name2, user: name1, recent };
 
+        const progKeys = [];
+        if (c.diary) progKeys.push("diary");
+        for (const t of TRACKERS) if (c[t.key]) progKeys.push(t.key);
+        if (c.topics) progKeys.push("topics");
+        if (progKeys.length) progInit(progKeys);
+
         // дневник — рефлексия (append)
         if (c.diary) try {
+            progSet("diary", "run");
             const out = await genMem(renderPrompt(getPrompt("diary"), vars));
             console.log("[Дневник души] Diary сырой ответ:", out);
             const text = cleanReflection(out);
-            if (!text) result.fail.push("Дневник: пустой ответ (см. F12)");
+            if (!text) { result.fail.push("Дневник: пустой ответ (см. F12)"); progSet("diary", "fail"); }
             else {
                 const saved = await api("append", { chat, date: today(), text });
-                if (saved && saved.ok) result.ok.push("Дневник");
-                else result.fail.push("Дневник: сервер не сохранил");
+                if (saved && saved.ok) { result.ok.push("Дневник"); progSet("diary", "done"); }
+                else { result.fail.push("Дневник: сервер не сохранил"); progSet("diary", "fail"); }
             }
-        } catch (e) { result.fail.push(`Дневник: ${e?.message || e}`); }
+        } catch (e) { result.fail.push(`Дневник: ${e?.message || e}`); progSet("diary", "fail"); }
 
         // трекеры — перезапись
         for (const t of TRACKERS) {
             if (!c[t.key]) continue;
             try {
+                progSet(t.key, "run");
                 const prevRes = await api("get", { chat, name: t.name });
                 const prev = (prevRes && prevRes.text) || "";
                 const out = await genMem(renderPrompt(getPrompt(t.key), { ...vars, prev }));
                 console.log(`[Дневник души] ${t.name} сырой ответ:`, out);
                 const text = (out || "").trim();
-                if (!text) { result.fail.push(`${DOC_RU[t.key]}: пустой ответ (см. F12)`); continue; }
+                if (!text) { result.fail.push(`${DOC_RU[t.key]}: пустой ответ (см. F12)`); progSet(t.key, "fail"); continue; }
                 const saved = await api("tracker", { chat, name: t.name, text });
-                if (saved && saved.ok) result.ok.push(DOC_RU[t.key]);
-                else result.fail.push(`${DOC_RU[t.key]}: сервер не сохранил (/tracker?)`);
-            } catch (e) { result.fail.push(`${DOC_RU[t.key]}: ${e?.message || e}`); }
+                if (saved && saved.ok) { result.ok.push(DOC_RU[t.key]); progSet(t.key, "done"); }
+                else { result.fail.push(`${DOC_RU[t.key]}: сервер не сохранил (/tracker?)`); progSet(t.key, "fail"); }
+            } catch (e) { result.fail.push(`${DOC_RU[t.key]}: ${e?.message || e}`); progSet(t.key, "fail"); }
         }
 
         // 3) факты/темы: Router решает какие темы, Archivist перезаписывает по одной (1 файл на тему)
         if (c.topics) try {
+            progSet("topics", "run");
             const existing = (await api("topics", { chat }))?.topics || [];
             const names = existing.map((t) => t.name.replace(/\.md$/, "")).join(", ") || "(none)";
             const plan = parseTopics(await genMem(renderPrompt(getPrompt("router"), { ...vars, topics: names })));
@@ -297,10 +341,12 @@ async function updateMemory(deep = false) {
                     if (saved && saved.ok) result.ok.push("Тема:" + nm);
                 } catch (e) { result.fail.push(`Тема: ${e?.message || e}`); }
             }
-        } catch (e) { result.fail.push(`Темы: ${e?.message || e}`); }
+            progSet("topics", "done");
+        } catch (e) { result.fail.push(`Темы: ${e?.message || e}`); progSet("topics", "fail"); }
     } finally {
         internalGen = false;
         trackerBusy = false;
+        progDone();
     }
     return result;
 }
@@ -357,6 +403,14 @@ function injectStyles() {
         .mm-mem-src .mm-src-d { background: rgba(120,140,255,.16); }
         .mm-mem-src .mm-src-f { background: rgba(63,214,198,.16); }
         .mm-mem-src .mm-src-l { background: rgba(232,176,96,.16); }
+        .mm-soul-prog { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; padding: 5px 12px; margin: 0 6px 4px;
+            border-radius: 8px; font-size: .78em; background: var(--SmartThemeBlurTintColor, rgba(30,30,42,.92));
+            border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,.15)); }
+        .mm-soul-prog .mm-sp-title { font-weight: 600; }
+        .mm-soul-prog .mm-sp-item { opacity: .65; }
+        .mm-soul-prog .mm-sp-item.run { opacity: 1; }
+        .mm-soul-prog .mm-sp-item.done { color: var(--ok, #6bc98a); opacity: 1; }
+        .mm-soul-prog .mm-sp-item.fail { color: var(--warning, #e06c6c); opacity: 1; }
     `;
     document.head.appendChild(s);
 }
@@ -713,7 +767,8 @@ function hookEvents() {
     // какие записи лорбука активировались в этой генерации -> для тега источника
     if (et.WORLD_INFO_ACTIVATED) {
         es.on(et.WORLD_INFO_ACTIVATED, (entries) => {
-            try { lastWI = (Array.isArray(entries) ? entries : []).map((e) => String(e.comment || (e.key && e.key[0]) || "запись").slice(0, 40)); }
+            // только записи С НАЗВАНИЕМ (нормальный лорбук/память); безымянные ключи-слова из карточки не тащим
+            try { lastWI = (Array.isArray(entries) ? entries : []).filter((e) => e && e.comment).map((e) => String(e.comment).slice(0, 40)); }
             catch (_) { lastWI = []; }
         });
     }
