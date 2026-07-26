@@ -150,14 +150,16 @@ async function genMem(promptText) {
     return await generateRaw({ prompt: promptText, systemPrompt: MEM_SYS, responseLength: 400 });
 }
 
-function recentDialogue(n = 6) {
+function recentDialogue(n = 8, maxChars = 6000) {
     const list = ctxRef?.chat || [];
-    return list.slice(-n)
+    let text = list.slice(-n)
         .map((m) => `${m.is_user ? name1 : name2}: ${(m.mes || "").trim()}`)
         .join("\n");
+    if (text.length > maxChars) text = "…\n" + text.slice(-maxChars); // защита от гигантского промта
+    return text;
 }
 
-async function updateMemory() {
+async function updateMemory(deep = false) {
     const result = { ok: [], fail: [] };
     if (trackerBusy) return result;
     const chat = chatId();
@@ -169,7 +171,9 @@ async function updateMemory() {
     trackerBusy = true;
     internalGen = true; // чтобы наши же хуки не сработали на служебную генерацию
     try {
-        const recent = recentDialogue(6);
+        // deep = ручной «Обновить сейчас»: большое окно, чтобы догнать историю.
+        // авто (каждые N ответов) — короткое окно (свежая дельта).
+        const recent = recentDialogue(deep ? 40 : 8);
 
         // 1) дневник — рефлексия от 1-го лица (дописываем)
         if (cfg().diary) try {
@@ -374,7 +378,7 @@ async function openViewer() {
         const label = runBtn.textContent;
         runBtn.textContent = "Обновляю…";
         try {
-            const r = await updateMemory();
+            const r = await updateMemory(true); // ручной прогон — глубокое окно
             const r2 = await api("docs", { chat });        // подтянуть свежие Psyche/Status
             docs = (r2 && r2.docs) || docs;
             for (const key in trCache) delete trCache[key]; // сбросить кэш перевода
