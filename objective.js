@@ -742,11 +742,14 @@ function injectStyles() {
         #${BTN_ID} { opacity: .6; transition: opacity .15s, color .15s; }
         #${BTN_ID}:hover { opacity: 1; }
 
-        #${PANEL_ID} { position: fixed; inset: 0; z-index: 10050; display: none;
+        #${PANEL_ID} { position: fixed; left: 0; right: 0; top: 0;
+            height: 100vh; height: 100dvh;   /* dvh — учитывает адресную строку/клавиатуру на мобиле */
+            z-index: 10050; display: none;
             align-items: center; justify-content: center; padding: 12px;
             box-sizing: border-box; background: rgba(0,0,0,.5); }
         #${PANEL_ID}.mmobj-open { display: flex; }
-        #${PANEL_ID} .mmobj-box { width: min(680px, 96vw); max-height: 88vh; display: flex;
+        #${PANEL_ID} .mmobj-box { width: min(680px, 96vw);
+            max-height: 88vh; max-height: 88dvh; display: flex;
             flex-direction: column; padding: 14px; border-radius: 12px;
             background: var(--SmartThemeBlurTintColor, #1e1e2a);
             border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,.15)); }
