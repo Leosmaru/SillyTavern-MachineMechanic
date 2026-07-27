@@ -920,11 +920,40 @@ function wireEvents() {
     $(document).on("click", "#mmobj-complete-current", markTaskCompleted);
 }
 
+// плашка «🎯 задача: …» под последним сообщением — только ТЕКУЩАЯ активная задача (не выполненные/будущие)
+function renderTaskBadge() {
+    try {
+        const mes = [...document.querySelectorAll("#chat .mes")].pop();
+        if (!mes) return;
+        mes.querySelector(".mm-obj-task")?.remove();
+        const desc = (currentTask && currentTask.description) ? String(currentTask.description).trim() : "";
+        if (!desc) return;
+        const div = document.createElement("div");
+        div.className = "mm-obj-task";
+        div.style.cssText = "margin-top:6px;font-size:.85em;opacity:.9;padding:3px 8px;border-radius:8px;background:rgba(80,180,140,.14);border:1px solid rgba(80,180,140,.4);display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap;";
+        const span = document.createElement("span");
+        span.textContent = "🎯 задача: " + desc;
+        const tr = document.createElement("span");
+        tr.className = "fa-solid fa-language interactable";
+        tr.title = "Перевести / вернуть оригинал";
+        tr.style.cssText = "cursor:pointer;opacity:.8;";
+        let ruCache = null, showingRu = false;
+        tr.addEventListener("click", async () => {
+            if (showingRu) { span.textContent = "🎯 задача: " + desc; showingRu = false; return; } // тумблер: назад к оригиналу
+            if (ruCache === null) { tr.style.opacity = ".4"; ruCache = await mmTranslateRu(desc); tr.style.opacity = ".8"; }
+            if (ruCache) { span.textContent = "🎯 задача: " + ruCache; showingRu = true; }
+        });
+        div.appendChild(span); div.appendChild(tr);
+        (mes.querySelector(".mes_block") || mes).appendChild(div);
+    } catch (e) {}
+}
+
 function onMessageReceived() {
     if (currentChatId == undefined || jQuery.isEmptyObject(currentTask) || lastMessageWasSwipe) {
         lastMessageWasSwipe = false;
         return;
     }
+    renderTaskBadge();
     let checkForCompletion = false;
     const noCheckTypes = ["continue", "quiet", "impersonate"];
     const lastType = substituteParams("{{lastGenerationType}}");
@@ -966,7 +995,7 @@ export function initObjective(ctx) {
     const es = ctx?.eventSource || eventSource;
     const et = ctx?.eventTypes || event_types;
 
-    es.on(et.CHAT_CHANGED, () => { resetState(); createButton(); });
+    es.on(et.CHAT_CHANGED, () => { resetState(); createButton(); setTimeout(renderTaskBadge, 700); });
     es.on(et.MESSAGE_SWIPED, () => { lastMessageWasSwipe = true; });
     es.on(et.MESSAGE_RECEIVED, onMessageReceived);
 
