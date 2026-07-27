@@ -107,6 +107,7 @@ function dcfg() {
     if (typeof c.interval !== "number") c.interval = 3;                          // раз в N ответов (0 = выкл)
     if (typeof c.style !== "string") c.style = NARRATOR_STYLES[0];              // стиль повествования
     if (typeof c.depth !== "number") c.depth = 1;                               // глубина инъекции события
+    if (typeof c.maxTokens !== "number") c.maxTokens = 1000;                    // свой лимит токенов на ответ режиссёра (мало → обрыв JSON)
     // при апгрейде версии промпта — один раз форс-сброс промпта и определений к новым (английским) дефолтам
     if (c.promptVer !== PROMPT_VER) { c.prompt = DEFAULT_PROMPT; c.eventDefs = { ...DEFAULT_EVENT_DEFS }; c.promptVer = PROMPT_VER; }
     if (typeof c.prompt !== "string" || !c.prompt) c.prompt = DEFAULT_PROMPT;
@@ -213,6 +214,12 @@ function pageHtml() {
         <label for="mmdir-interval">Частота (раз в N ответов)</label>
         <input id="mmdir-interval" class="text_pole widthUnset" type="number" min="0" max="99" />
         <small>(0 = выкл)</small>
+    </div>
+
+    <div class="objective_block objective_block_control flex1" style="margin-top:6px;">
+        <label for="mmdir-maxtokens">Макс. токенов на ответ режиссёра</label>
+        <input id="mmdir-maxtokens" class="text_pole widthUnset" type="number" min="128" max="3000" />
+        <small>(мало → «не вернула JSON»; свой, не зависит от основного)</small>
     </div>
 
     <div class="objective_block objective_block_control flex1 flexFlowColumn" style="margin-top:8px;">
@@ -432,7 +439,7 @@ async function directorPass() {
         progShow("Режиссёр смотрит на сцену…");
         const ws = parseWS(await worldLoad());
         const prompt = renderPrompt(dcfg().prompt, ws);
-        const raw = await generateRaw({ prompt, systemPrompt: dirSys(), responseLength: 500 });
+        const raw = await generateRaw({ prompt, systemPrompt: dirSys(), responseLength: dcfg().maxTokens });
         const plan = parsePlan(raw);
         if (plan) {
             applyUpdates(ws, plan.world_updates, plan.npc);
@@ -572,12 +579,15 @@ export function initDirector(ctx) {
     if (iv) iv.value = c.interval;
     const stl = document.getElementById("mmdir-style");
     if (stl) stl.value = c.style;
+    const mt = document.getElementById("mmdir-maxtokens");
+    if (mt) mt.value = c.maxTokens;
 
     // Делегированные обработчики (панель строится один раз).
     $(document).off("change.mmdir click.mmdir input.mmdir");
     $(document).on("change.mmdir", "#mmdir-enabled", () => { dcfg().enabled = $("#mmdir-enabled").prop("checked"); dirCounter = dcfg().interval; saveCfg(); });
     $(document).on("click.mmdir", "#mmdir-flip", () => showDirector(!onDirectorPage));
     $(document).on("input.mmdir", "#mmdir-interval", () => { dcfg().interval = Number($("#mmdir-interval").val()) || 0; dirCounter = dcfg().interval; saveCfg(); });
+    $(document).on("input.mmdir", "#mmdir-maxtokens", () => { dcfg().maxTokens = Number($("#mmdir-maxtokens").val()) || 1000; saveCfg(); });
     $(document).on("click.mmdir", "#mmdir-run", async () => {
         const st = document.getElementById("mmdir-world-status");
         if (st) st.textContent = "прогон…";
