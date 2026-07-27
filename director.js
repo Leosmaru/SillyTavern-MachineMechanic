@@ -503,19 +503,17 @@ function parsePlan(raw) {
 // ---------------------------------------------------------------------------
 // Жизненный цикл события: зарядка (now/announce), инъекция, расход
 // ---------------------------------------------------------------------------
+// Как в Soul of Waifu: событие — реплика НАРРАТОРА в потоке (роль USER), а не system-приписка сбоку.
+// Персонаж отвечает на неё как на сцену. Метка [Narrator] — чтобы не спутал с речью игрока.
 function eventDirective(ev) {
-    const who = name2 || "The character";
-    if (dcfg().hardDirective) // жёсткая: заставляем отыграть в этом же ответе
-        return `[SCENE EVENT — this happens in the scene RIGHT NOW. ${who} MUST notice it and weave a concrete reaction into THIS reply. Do not ignore it]: ${ev}`;
-    return `[SCENE EVENT — the following just happened in the scene. ${who} responds to it naturally in the reply]: ${ev}`; // мягкая (по умолч.)
+    const who = name2 || "the character";
+    if (dcfg().hardDirective) // жёстче: прямой наказ отыграть в этом же ответе
+        return `[Narrator — this happens in the scene RIGHT NOW; ${who} must notice it and react to it in THIS very reply]: ${ev}`;
+    return `[Narrator]: ${ev}`; // просто сцена — персонаж реагирует, как в Soul of Waifu
 }
-function setInjection(text) {
-    try {
-        if (dcfg().hardDirective) setExtensionPrompt(INJECT_KEY, eventDirective(text), 1, 0, false, 0); // агрессивно: глубина 0 + роль SYSTEM (как кубик)
-        else setExtensionPrompt(INJECT_KEY, eventDirective(text), 1, dcfg().depth);                     // обычно: своя глубина (1)
-    } catch (e) {}
-}
-function clearInjection() { try { setExtensionPrompt(INJECT_KEY, "", 1, dcfg().depth); } catch (e) {} pendingEvent = null; eventUsed = false; }
+// роль USER (1) + глубина 0 — событие встаёт как самая свежая реплика сцены, на которую пишется ответ (ключевое отличие от system-вставки)
+function setInjection(text) { try { setExtensionPrompt(INJECT_KEY, eventDirective(text), 1, 0, false, 1); } catch (e) {} }
+function clearInjection() { try { setExtensionPrompt(INJECT_KEY, "", 1, 0, false, 1); } catch (e) {} pendingEvent = null; eventUsed = false; }
 
 // зарядить событие: now — сразу инъекция; announce — плашка-анонс сейчас, инъекция на следующем сообщении
 function chargeEvent(ev, type) {
