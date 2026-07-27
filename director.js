@@ -504,14 +504,13 @@ function parsePlan(raw) {
 // Жизненный цикл события: зарядка (now/announce), инъекция, расход
 // ---------------------------------------------------------------------------
 function eventDirective(ev) {
-    const who = name2 || "the character";
-    if (dcfg().hardDirective) // жёсткая: как у кубика — obey strictly + >>> <<<
-        return `[SCENE DIRECTOR — obey strictly. This happens in the scene RIGHT NOW; ${who} MUST notice it and give it a concrete, immediate reaction in THIS reply, integrated naturally. It is FORBIDDEN to ignore, downplay or postpone it. >>> ${ev} <<<]`;
-    return `[SCENE — the following just happened in the scene right now; ${who} reacts to it in this reply: ${ev}]`; // мягкая (по умолч.)
+    const who = name2 || "The character";
+    if (dcfg().hardDirective) // жёсткая: заставляем отыграть в этом же ответе
+        return `[SCENE EVENT — this happens in the scene RIGHT NOW. ${who} MUST notice it and weave a concrete reaction into THIS reply. Do not ignore it]: ${ev}`;
+    return `[SCENE EVENT — the following just happened in the scene. ${who} responds to it naturally in the reply]: ${ev}`; // мягкая (по умолч.)
 }
-// глубина 0 + роль SYSTEM (0) — ровно как у кубика, который РАБОТАЕТ. На глубине 1 модель вставку хоронит.
-function setInjection(text) { try { setExtensionPrompt(INJECT_KEY, eventDirective(text), 1, 0, false, 0); } catch (e) {} }
-function clearInjection() { try { setExtensionPrompt(INJECT_KEY, "", 1, 0, false, 0); } catch (e) {} pendingEvent = null; eventUsed = false; }
+function setInjection(text) { try { setExtensionPrompt(INJECT_KEY, eventDirective(text), 1, dcfg().depth); } catch (e) {} }
+function clearInjection() { try { setExtensionPrompt(INJECT_KEY, "", 1, dcfg().depth); } catch (e) {} pendingEvent = null; eventUsed = false; }
 
 // зарядить событие: now — сразу инъекция; announce — плашка-анонс сейчас, инъекция на следующем сообщении
 function chargeEvent(ev, type) {
@@ -772,7 +771,7 @@ export function initDirector(ctx) {
     es.on(et.CHAT_CHANGED, () => {
         dirCounter = dcfg().interval;
         pendingEvent = null; announceEvent = null; eventUsed = false;
-        try { setExtensionPrompt(INJECT_KEY, "", 1, 0, false, 0); } catch (e) {}
+        try { setExtensionPrompt(INJECT_KEY, "", 1, dcfg().depth); } catch (e) {}
         setTimeout(restoreEventBadges, 600);
     });
     dirCounter = c.interval;
