@@ -509,7 +509,12 @@ function eventDirective(ev) {
         return `[SCENE EVENT — this happens in the scene RIGHT NOW. ${who} MUST notice it and weave a concrete reaction into THIS reply. Do not ignore it]: ${ev}`;
     return `[SCENE EVENT — the following just happened in the scene. ${who} responds to it naturally in the reply]: ${ev}`; // мягкая (по умолч.)
 }
-function setInjection(text) { try { setExtensionPrompt(INJECT_KEY, eventDirective(text), 1, dcfg().depth); } catch (e) {} }
+function setInjection(text) {
+    try {
+        if (dcfg().hardDirective) setExtensionPrompt(INJECT_KEY, eventDirective(text), 1, 0, false, 0); // агрессивно: глубина 0 + роль SYSTEM (как кубик)
+        else setExtensionPrompt(INJECT_KEY, eventDirective(text), 1, dcfg().depth);                     // обычно: своя глубина (1)
+    } catch (e) {}
+}
 function clearInjection() { try { setExtensionPrompt(INJECT_KEY, "", 1, dcfg().depth); } catch (e) {} pendingEvent = null; eventUsed = false; }
 
 // зарядить событие: now — сразу инъекция; announce — плашка-анонс сейчас, инъекция на следующем сообщении
