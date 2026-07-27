@@ -22,9 +22,12 @@ import { extension_settings, saveMetadataDebounced } from "../../../extensions.j
 import { callGenericPopup, POPUP_TYPE } from "../../../popup.js";
 import { mmEnqueue, mmBusy } from "./mmQueue.js";
 import { power_user } from "../../../power-user.js";
+import { loadWorldInfo, saveWorldInfo, createWorldInfoEntry, METADATA_KEY, world_names } from "../../../world-info.js";
+import { autoCreateLorebook } from "./autocreate.js";
 
 const API = "/api/plugins/soul-md";
 const INJECT_KEY = "MM_DIRECTOR";
+const WORLD_INJECT_KEY = "MM_DIRECTOR_WORLD"; // состояние мира в промпт персонажа — фон (SYSTEM), как дневник
 const WORLD_DOC = "World";
 
 let ctxRef = null;
@@ -139,6 +142,8 @@ function dcfg() {
     if (typeof c.maxTokens !== "number") c.maxTokens = 1000;                    // свой лимит токенов на ответ режиссёра (мало → обрыв JSON)
     if (c.eventMode !== "now" && c.eventMode !== "announce") c.eventMode = "now"; // показ: now (сразу) | announce (плашка сейчас, событие след. генерацией)
     if (typeof c.hardDirective !== "boolean") c.hardDirective = false;            // жёсткая директива (заставлять модель) — по умолч. ВЫКЛ
+    if (typeof c.npc !== "boolean") c.npc = false;                                // NPC-реестр (лорбук + режиссёр вводит/выводит) — по умолч. ВЫКЛ
+    if (typeof c.showWorld !== "boolean") c.showWorld = false;                    // давать персонажу состояние мира (World.md → промпт, SYSTEM-фон) — по умолч. ВЫКЛ
     // при апгрейде версии промпта — один раз форс-сброс промпта и определений к новым (английским) дефолтам
     if (c.promptVer !== PROMPT_VER) { c.prompt = DEFAULT_PROMPT; c.eventDefs = { ...DEFAULT_EVENT_DEFS }; c.preset = PRESET_KEYS[0]; c.promptVer = PROMPT_VER; }
     if (typeof c.prompt !== "string" || !c.prompt) c.prompt = DEFAULT_PROMPT;
@@ -189,6 +194,87 @@ async function worldSave(text) {
     if (!res.ok) return { ok: false, reason: res.skipped || res.error || "сервер отклонил" };
     return { ok: true };
 }
+
+// ---------------------------------------------------------------------------
+// NPC-реестр в лорбуке чата (порт «кто на сцене» из Soul of Waifu, но без своего
+// актёра — озвучивает главный персонаж). Записи помечены mm_npc, БЕЗ stmemorybooks,
+// значит саммаризатор их игнорит (summaryTiers.js:87 требует stmemorybooks===true).
+// constant + @Depth(4)/SYSTEM: тихий фон, всегда на сцене пока запись включена.
+// Вход → включить/создать запись; выход (npc_remove) → disable (гаснет, не удаляем).
+// ---------------------------------------------------------------------------
+const NPC_FLAG = "mm_npc";
+const NPC_POS_ATDEPTH = 4; // world_info_position.atDepth
+const npcComment = (name) => `🎭 NPC: ${name}`;
+const npcCard = (name, archetype, personality) =>
+    `${name}${archetype ? ` (${archetype})` : ""}: ${String(personality || "").trim()}`.trim();
+
+// привязанный к чату лорбук (тот же слот, что у памяти STMemoryBooks)
+function boundLorebook() {
+    try { const n = chat_metadata?.[METADATA_KEY]; return (n && Array.isArray(world_names) && world_names.includes(n)) ? n : null; } catch (e) { return null; }
+}
+// найти лорбук; если у чата ещё нет — создать/привязать конвенцией памяти (её же имя-шаблон),
+// чтобы мод памяти увидел его своим и не предлагал создавать заново
+async function ensureLorebook() {
+    const n = boundLorebook();
+    if (n) return n;
+    try {
+        const tpl = extension_settings.STMemoryBooks?.moduleSettings?.lorebookNameTemplate || "LTM - {{char}} - {{chat}}";
+        const r = await autoCreateLorebook(tpl, "npc");
+        return r?.success ? r.name : null;
+    } catch (e) { console.warn("[Режиссёр] лорбук:", e); return null; }
+}
+const isNpcEntry = (e) => !!(e && e[NPC_FLAG]);
+function findNpcEntry(data, name) {
+    return Object.values(data?.entries || {}).find((e) => isNpcEntry(e) && (e.mm_npc_name === name || (Array.isArray(e.key) && e.key.includes(name))));
+}
+// создать/обновить (и включить) запись NPC
+async function npcUpsert(name, archetype, personality, { enable = true } = {}) {
+    name = String(name || "").trim();
+    if (!name) return false;
+    const lb = await ensureLorebook(); if (!lb) return false;
+    const data = await loadWorldInfo(lb); if (!data || !data.entries) return false;
+    let e = findNpcEntry(data, name);
+    if (!e) { e = createWorldInfoEntry(lb, data); if (!e) return false; }
+    e[NPC_FLAG] = true; e.mm_npc_name = name;
+    e.key = [name]; e.comment = npcComment(name);
+    if (personality || archetype || !e.content) e.content = npcCard(name, archetype, personality);
+    e.constant = true; e.vectorized = false; e.selective = false;
+    e.position = NPC_POS_ATDEPTH; e.depth = 4; e.role = 0; e.addMemo = true;
+    if (enable) e.disable = false;
+    await saveWorldInfo(lb, data, true);
+    return true;
+}
+// вкл/выкл запись (выход = disable:true; возврат = disable:false)
+async function npcSetDisabled(name, disabled) {
+    const lb = boundLorebook(); if (!lb) return false;
+    const data = await loadWorldInfo(lb); if (!data) return false;
+    const e = findNpcEntry(data, String(name || "").trim()); if (!e) return false;
+    e.disable = !!disabled;
+    await saveWorldInfo(lb, data, true);
+    return true;
+}
+// сохранить отредактированную вручную карточку (имя/текст)
+async function npcSaveCard(oldName, name, content) {
+    const lb = boundLorebook(); if (!lb) return false;
+    const data = await loadWorldInfo(lb); if (!data) return false;
+    const e = findNpcEntry(data, String(oldName || "").trim()); if (!e) return false;
+    name = String(name || "").trim() || oldName;
+    e.mm_npc_name = name; e.key = [name]; e.comment = npcComment(name);
+    e.content = String(content || "");
+    await saveWorldInfo(lb, data, true);
+    return true;
+}
+// список NPC этого чата: [{name, content, disabled}]
+async function npcList() {
+    const lb = boundLorebook(); if (!lb) return [];
+    const data = await loadWorldInfo(lb); if (!data) return [];
+    return Object.values(data.entries || {}).filter(isNpcEntry).map((e) => ({
+        name: e.mm_npc_name || (Array.isArray(e.key) ? e.key[0] : "") || "?",
+        content: e.content || "",
+        disabled: !!e.disable,
+    }));
+}
+async function npcActiveNames() { return (await npcList()).filter((n) => !n.disabled).map((n) => n.name); }
 
 // ---------------------------------------------------------------------------
 // Индикатор «режиссёр обновляет мир» (паттерн прогресс-бара 🧠)
@@ -269,6 +355,8 @@ function pageHtml() {
             <option value="announce">Анонс (плашка сейчас, событие — следующей генерацией)</option>
         </select>
         <label class="checkbox_label" style="margin-top:6px;"><input id="mmdir-hard" type="checkbox"> Жёсткая директива (заставлять модель отыграть)</label>
+        <label class="checkbox_label" style="margin-top:6px;"><input id="mmdir-showworld" type="checkbox"> Давать персонажу состояние мира</label>
+        <small>Состояние из World.md идёт в промпт как тихий фон (SYSTEM, как дневник), не как событие. По умолч. выкл.</small>
     </div>
 
     <div class="objective_block objective_block_control flex1 flexFlowColumn" style="margin-top:8px;">
@@ -295,6 +383,16 @@ function pageHtml() {
         <input id="mmdir-world-save" class="menu_button" type="button" value="Сохранить" />
         <input id="mmdir-run" class="menu_button" type="button" value="▶ Запустить сейчас" title="Прогнать режиссёра немедленно (тест, без учёта тумблера/частоты)" />
         <span id="mmdir-world-status" style="opacity:.7; margin-left:6px;"></span>
+    </div>
+
+    <hr class="m-t-1 m-b-1">
+
+    <label class="checkbox_label"><input id="mmdir-npc" type="checkbox"> NPC-реестр (режиссёр вводит/выводит персонажей)</label>
+    <small style="opacity:.75; display:block; margin-top:2px;">Новых персонажей режиссёр заводит записью в лорбуке чата (constant, тихо на глубине). Ушёл — запись гаснет, но остаётся (клик вернёт). Память-саммари их не трогает. Клик по имени — на сцену/со сцены, ✎ — правка.</small>
+    <div id="mmdir-npc-list" style="margin-top:6px; display:flex; flex-direction:column; gap:4px;"></div>
+    <div class="objective_block flex-container" style="margin-top:6px;">
+        <input id="mmdir-npc-refresh" class="menu_button" type="button" value="Обновить список" />
+        <input id="mmdir-npc-add" class="menu_button" type="button" value="+ NPC вручную" />
     </div>`;
 }
 
@@ -311,7 +409,7 @@ function showDirector(on) {
     if (dirPage) dirPage.style.display = on ? "" : "none";
     if (title) title.textContent = on ? "🎬 Режиссёр" : "🎯 Цели (Objective)";
     if (flip) flip.textContent = on ? "◂ Цели" : "Режиссёр ▸";
-    if (on) refreshWorld();
+    if (on) { refreshWorld(); renderNpcList(); }
 }
 
 async function refreshWorld() {
@@ -322,6 +420,82 @@ async function refreshWorld() {
     const text = await worldLoad();
     ta.value = text || "";
     if (st) st.textContent = text ? "" : "(мир пуст)";
+}
+
+// ---------------------------------------------------------------------------
+// UI NPC-реестра: список персонажей чата (активные — тегом, ушедшие — гаснут).
+// Клик по имени переключает на сцене/со сцены, ✎ — правка карточки.
+// ---------------------------------------------------------------------------
+async function renderNpcList() {
+    const host = document.getElementById("mmdir-npc-list");
+    if (!host) return;
+    let list = [];
+    try { list = await npcList(); } catch (e) {}
+    if (!list.length) { host.innerHTML = `<small style="opacity:.6;">Пока никого. Режиссёр введёт по ходу, или добавь вручную.</small>`; return; }
+    host.innerHTML = "";
+    for (const n of list) {
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex; align-items:center; gap:8px;";
+        const chip = document.createElement("span");
+        chip.textContent = n.name + (n.disabled ? " (вышел)" : "");
+        chip.title = n.disabled ? "Выключен — клик вернёт на сцену" : "На сцене — клик уберёт";
+        chip.style.cssText = `cursor:pointer; padding:2px 10px; border-radius:12px; font-size:.9em; white-space:nowrap; border:1px solid rgba(120,160,230,${n.disabled ? ".25" : ".6"}); background:rgba(120,160,230,${n.disabled ? ".06" : ".18"}); opacity:${n.disabled ? ".55" : "1"};`;
+        chip.addEventListener("click", async () => { await npcSetDisabled(n.name, !n.disabled); renderNpcList(); });
+        const edit = document.createElement("span");
+        edit.className = "fa-solid fa-pencil interactable";
+        edit.title = "Редактировать персонажа";
+        edit.style.cssText = "cursor:pointer; opacity:.7;";
+        edit.addEventListener("click", () => editNpc(n));
+        const desc = document.createElement("small");
+        desc.style.cssText = "opacity:.6; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0;";
+        desc.textContent = n.content;
+        row.appendChild(chip); row.appendChild(edit); row.appendChild(desc);
+        host.appendChild(row);
+    }
+}
+
+function editNpc(n) {
+    const html = `
+    <div class="objective_prompt_modal">
+        <label>Имя</label>
+        <input id="mmdir-npc-name" class="text_pole" type="text" />
+        <label style="margin-top:6px;">Карточка (роль, характер) — уходит персонажу как досье</label>
+        <textarea id="mmdir-npc-content" class="text_pole textarea_compact" rows="4"></textarea>
+        <div class="objective_prompt_block" style="margin-top:6px;">
+            <input id="mmdir-npc-save" class="menu_button" type="button" value="Сохранить" />
+            <input id="mmdir-npc-del" class="menu_button" type="button" value="Убрать со сцены" />
+        </div>
+    </div>`;
+    callGenericPopup(html, POPUP_TYPE.TEXT, "", { wide: true });
+    $("#mmdir-npc-name").val(n.name || "");
+    $("#mmdir-npc-content").val(n.content || "");
+    $("#mmdir-npc-save").on("click", async () => {
+        await npcSaveCard(n.name, String($("#mmdir-npc-name").val()), String($("#mmdir-npc-content").val()));
+        renderNpcList();
+        try { toastr.success("Сохранено", "🎭 NPC"); } catch (e) {}
+    });
+    $("#mmdir-npc-del").on("click", async () => { await npcSetDisabled(n.name, true); renderNpcList(); });
+}
+
+function addNpc() {
+    const html = `
+    <div class="objective_prompt_modal">
+        <label>Имя нового NPC</label>
+        <input id="mmdir-npc-name" class="text_pole" type="text" />
+        <label style="margin-top:6px;">Карточка (роль, характер)</label>
+        <textarea id="mmdir-npc-content" class="text_pole textarea_compact" rows="4" placeholder="Напр.: бродяга, угрюмый, говорит загадками"></textarea>
+        <div class="objective_prompt_block" style="margin-top:6px;">
+            <input id="mmdir-npc-add-save" class="menu_button" type="button" value="Добавить на сцену" />
+        </div>
+    </div>`;
+    callGenericPopup(html, POPUP_TYPE.TEXT, "", { wide: true });
+    $("#mmdir-npc-add-save").on("click", async () => {
+        const nm = String($("#mmdir-npc-name").val() || "").trim();
+        if (!nm) { try { toastr.warning("Впиши имя", "🎭 NPC"); } catch (e) {} return; }
+        await npcUpsert(nm, "", String($("#mmdir-npc-content").val() || "").trim(), { enable: true });
+        renderNpcList();
+        try { toastr.success("Добавлен: " + nm, "🎭 NPC"); } catch (e) {}
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -515,6 +689,26 @@ function eventDirective(ev) {
 function setInjection(text) { try { setExtensionPrompt(INJECT_KEY, eventDirective(text), 1, 0, false, 1); } catch (e) {} }
 function clearInjection() { try { setExtensionPrompt(INJECT_KEY, "", 1, 0, false, 1); } catch (e) {} pendingEvent = null; eventUsed = false; }
 
+// ---------------------------------------------------------------------------
+// Состояние мира в промпт персонажа — тихий ФОН (роль SYSTEM), а НЕ реплика.
+// Не USER-метод события (на который персонаж отвечает), а как дневник души:
+// setExtensionPrompt(..., 1, 4) — IN_CHAT, глубина 4, роль SYSTEM по умолчанию.
+// Персонаж учитывает мир, но не «реагирует» на него. Файл не меняем — только читаем.
+// ---------------------------------------------------------------------------
+function clearWorldInjection() { try { setExtensionPrompt(WORLD_INJECT_KEY, "", 1, 4); } catch (e) {} }
+async function refreshWorldInjection() {
+    if (!dcfg().showWorld) { clearWorldInjection(); return; }
+    try {
+        const body = renderWSForPrompt(parseWS(await worldLoad())); // без <!-- MMWORLD json -->: только читаемые строки
+        setExtensionPrompt(WORLD_INJECT_KEY, body ? `[Текущее состояние мира]\n${body}` : "", 1, 4);
+    } catch (e) { console.warn("[Режиссёр] мир→промпт:", e); }
+}
+// на старте реальной генерации персонажа (quiet/impersonate — служебные, мир не показываем)
+async function onGenStartWorld(type) {
+    if (type === "quiet" || type === "impersonate") return;
+    await refreshWorldInjection();
+}
+
 // зарядить событие: now — сразу инъекция; announce — плашка-анонс сейчас, инъекция на следующем сообщении
 function chargeEvent(ev, type) {
     type = type || "none";
@@ -556,11 +750,26 @@ async function directorPass(forceType = null) {
         } else if (forceType) {
             prompt += `\n\nMANDATORY THIS TURN: event_type MUST be "${forceType}". Produce a strong, concrete event_text for it (fill "npc" if visitor). Do NOT return "none".`;
         }
+        if (dcfg().npc) {
+            const active = await npcActiveNames();
+            prompt += `\n\nNPCs CURRENTLY ON SCENE: ${active.length ? active.join(", ") : "(none)"}.\n`
+                + `Add ONE more field to the JSON: "npc_remove": []. List the exact names of any on-scene NPC who CLEARLY left THIS turn (said goodbye, walked away, was sent off, died). If nobody left — "npc_remove": []. Never remove someone just to tidy up; a silent NPC stays.`;
+        }
         const raw = await generateRaw({ prompt, systemPrompt: dirSys(), responseLength: dcfg().maxTokens });
         const plan = parsePlan(raw);
         if (plan) {
-            applyUpdates(ws, plan.world_updates, plan.npc);
+            // при включённом NPC-реестре персонажи живут в лорбуке, не в World.md (иначе дубль)
+            applyUpdates(ws, plan.world_updates, dcfg().npc ? null : plan.npc);
             await worldSave(renderWSMd(ws));
+            if (dcfg().npc) {
+                try {
+                    const np = plan.npc;
+                    if (np && np.name) await npcUpsert(np.name, np.archetype, np.personality, { enable: true }); // вход
+                    const rem = plan.npc_remove;
+                    if (Array.isArray(rem)) for (const nm of rem) { if (nm) await npcSetDisabled(nm, true); }      // выход → гасим
+                    if (np?.name || (Array.isArray(rem) && rem.length)) renderNpcList();
+                } catch (e) { console.warn("[Режиссёр] NPC:", e); }
+            }
             const ev = String(plan.event_text || "").trim();
             if (ev) {
                 chargeEvent(ev, plan.event_type);
@@ -727,6 +936,10 @@ export function initDirector(ctx) {
     if (em) em.value = c.eventMode;
     const hd = document.getElementById("mmdir-hard");
     if (hd) hd.checked = c.hardDirective;
+    const npccb = document.getElementById("mmdir-npc");
+    if (npccb) npccb.checked = c.npc;
+    const sw = document.getElementById("mmdir-showworld");
+    if (sw) sw.checked = c.showWorld;
 
     // Делегированные обработчики (панель строится один раз).
     $(document).off("change.mmdir click.mmdir input.mmdir");
@@ -751,6 +964,10 @@ export function initDirector(ctx) {
     $(document).on("click.mmdir", ".mmdir-force", function () { const t = this.getAttribute("data-ev"); if (t) runDirector(t); });
     $(document).on("change.mmdir", "#mmdir-eventmode", () => { dcfg().eventMode = String($("#mmdir-eventmode").val()); saveCfg(); });
     $(document).on("change.mmdir", "#mmdir-hard", () => { dcfg().hardDirective = $("#mmdir-hard").prop("checked"); saveCfg(); });
+    $(document).on("change.mmdir", "#mmdir-npc", () => { dcfg().npc = $("#mmdir-npc").prop("checked"); saveCfg(); renderNpcList(); });
+    $(document).on("click.mmdir", "#mmdir-npc-refresh", renderNpcList);
+    $(document).on("click.mmdir", "#mmdir-npc-add", addNpc);
+    $(document).on("change.mmdir", "#mmdir-showworld", () => { dcfg().showWorld = $("#mmdir-showworld").prop("checked"); saveCfg(); if (!dcfg().showWorld) clearWorldInjection(); });
     $(document).on("click.mmdir", "#mmdir-prompt-edit", editPrompt);
     $(document).on("click.mmdir", "#mmdir-world-load", refreshWorld);
     $(document).on("click.mmdir", "#mmdir-world-save", async () => {
@@ -764,6 +981,7 @@ export function initDirector(ctx) {
     const es = ctxRef?.eventSource || eventSource;
     const et = ctxRef?.eventTypes || event_types;
     es.on(et.MESSAGE_RECEIVED, onCharMessage);
+    if (et.GENERATION_STARTED) es.on(et.GENERATION_STARTED, onGenStartWorld); // мир→промпт: ST ждёт этот async-хук перед сборкой промпта
     es.on(et.MESSAGE_SWIPED, () => { lastWasSwipe = true; });
     es.on(et.MESSAGE_SENT, () => {
         // анонс → заряжаем сейчас (сработает в ближайшем ответе персонажа)
@@ -775,8 +993,11 @@ export function initDirector(ctx) {
         dirCounter = dcfg().interval;
         pendingEvent = null; announceEvent = null; eventUsed = false;
         try { setExtensionPrompt(INJECT_KEY, "", 1, dcfg().depth); } catch (e) {}
+        clearWorldInjection();
         setTimeout(restoreEventBadges, 600);
+        setTimeout(renderNpcList, 700); // лорбук привязан к новому чату — перечитать список
     });
     dirCounter = c.interval;
     setTimeout(restoreEventBadges, 800);
+    setTimeout(renderNpcList, 900);
 }
