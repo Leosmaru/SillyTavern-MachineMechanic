@@ -9,7 +9,7 @@
 // Все id в DOM с префиксом mmobj- — чтобы не конфликтовать со standalone-версией.
 // ============================================================================
 
-import { chat_metadata, saveSettingsDebounced, is_send_press, extension_prompt_types } from "../../../../script.js";
+import { chat_metadata, saveSettingsDebounced, is_send_press, extension_prompt_types, getRequestHeaders } from "../../../../script.js";
 import { getContext, extension_settings, saveMetadataDebounced } from "../../../extensions.js";
 import { substituteParams, eventSource, event_types, generateQuietPrompt } from "../../../../script.js";
 import { waitUntilCondition } from "../../../utils.js";
@@ -17,6 +17,7 @@ import { is_group_generating, selected_group } from "../../../group-chats.js";
 import { callGenericPopup, Popup, POPUP_TYPE } from "../../../popup.js";
 import { SlashCommandParser } from "../../../slash-commands/SlashCommandParser.js";
 import { SlashCommand } from "../../../slash-commands/SlashCommand.js";
+import { initDirector } from "./director.js";
 
 const MODULE_NAME = "Objective";
 const BTN_ID = "mm-objective-button";
@@ -382,6 +383,17 @@ class ObjectiveTask {
 //#       Custom Prompts        #//
 //###############################//
 
+// перевод текста на русский для чтения (промпт не меняется)
+async function mmTranslateRu(text) {
+    try {
+        const r = await fetch("/api/translate/yandex", {
+            method: "POST", headers: getRequestHeaders(),
+            body: JSON.stringify({ chunks: [text], lang: "ru" }),
+        });
+        return r.ok ? await r.text() : null;
+    } catch (e) { return null; }
+}
+
 function onEditPromptClick() {
     let popupText = `
     <div class="objective_prompt_modal">
@@ -400,10 +412,16 @@ function onEditPromptClick() {
         <div>
             <label for="mmobj-prompt-generate">Промпт генерации задач</label>
             <textarea id="mmobj-prompt-generate" type="text" class="text_pole textarea_compact" rows="6"></textarea>
+            <div class="objective_prompt_block"><input id="mmobj-tr-generate" class="menu_button" type="button" value="🌐 Перевести" /></div>
+            <div id="mmobj-trout-generate" style="opacity:.8;margin:3px 0;"></div>
             <label for="mmobj-prompt-check">Промпт проверки выполнения</label>
             <textarea id="mmobj-prompt-check" type="text" class="text_pole textarea_compact" rows="6"></textarea>
+            <div class="objective_prompt_block"><input id="mmobj-tr-check" class="menu_button" type="button" value="🌐 Перевести" /></div>
+            <div id="mmobj-trout-check" style="opacity:.8;margin:3px 0;"></div>
             <label for="mmobj-prompt-extension-prompt">Инъекция текущей задачи</label>
             <textarea id="mmobj-prompt-extension-prompt" type="text" class="text_pole textarea_compact" rows="6"></textarea>
+            <div class="objective_prompt_block"><input id="mmobj-tr-ext" class="menu_button" type="button" value="🌐 Перевести" /></div>
+            <div id="mmobj-trout-ext" style="opacity:.8;margin:3px 0;"></div>
         </div>
     </div>`;
     callGenericPopup(popupText, POPUP_TYPE.TEXT, "", { allowVerticalScrolling: true, wide: true });
@@ -433,6 +451,17 @@ function onEditPromptClick() {
     $("#mmobj-custom-prompt-save").on("click", () => saveCustomPrompt());
     $("#mmobj-custom-prompt-delete").on("click", () => deleteCustomPrompt());
     $("#mmobj-custom-prompt-select").on("change", loadCustomPrompt);
+
+    // 🌐-кнопки: перевод содержимого textarea для чтения (промпт не меняется)
+    const _wireTr = (btnId, taId, outId) => $(`#${btnId}`).on("click", async () => {
+        const out = document.getElementById(outId);
+        if (out) out.textContent = "перевод…";
+        const t = await mmTranslateRu(String($(`#${taId}`).val() || ""));
+        if (out) out.textContent = t ? ("→ " + t) : "не удалось перевести";
+    });
+    _wireTr("mmobj-tr-generate", "mmobj-prompt-generate", "mmobj-trout-generate");
+    _wireTr("mmobj-tr-check", "mmobj-prompt-check", "mmobj-trout-check");
+    _wireTr("mmobj-tr-ext", "mmobj-prompt-extension-prompt", "mmobj-trout-ext");
 }
 
 async function newCustomPrompt() {
@@ -746,6 +775,10 @@ function injectStyles() {
         [id^=mmobj-task-delete-] { color: #da3f3f; }
         #mmobj-tasks span { margin: unset; margin-bottom: 5px !important; }
         .objective_prompt_modal textarea { max-height: 50vh; max-height: 50dvh; resize: vertical; }
+
+        #${PANEL_ID} .mmobj-head-right { display: flex; align-items: center; gap: 8px; }
+        #${PANEL_ID} .mmdir-toggle { display: flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; opacity: .85; }
+        #${PANEL_ID} .mmobj-flip { cursor: pointer; padding: 2px 8px; }
     `;
     document.head.appendChild(s);
 }
@@ -754,10 +787,14 @@ function panelHtml() {
     return `
     <div class="mmobj-box">
         <div class="mmobj-head">
-            <div class="mmobj-title">🎯 Цели (Objective)</div>
-            <div class="mmobj-x fa-solid fa-xmark interactable" title="Закрыть" tabindex="0"></div>
+            <div class="mmobj-title" id="mmobj-head-title">🎯 Цели (Objective)</div>
+            <div class="mmobj-head-right">
+                <label class="mmdir-toggle" title="Включить/выключить режиссёра"><input type="checkbox" id="mmdir-enabled"> 🎬</label>
+                <div class="mmobj-flip menu_button" id="mmdir-flip" title="Открыть/закрыть страницу режиссёра">Режиссёр ▸</div>
+                <div class="mmobj-x fa-solid fa-xmark interactable" title="Закрыть" tabindex="0"></div>
+            </div>
         </div>
-        <div class="mmobj-body">
+        <div class="mmobj-body" id="mmobj-page-objective">
             <details class="mmobj-help">
                 <summary>Как пользоваться</summary>
                 <div>
@@ -814,6 +851,7 @@ function panelHtml() {
                 <input id="mmobj-complete-current" class="menu_button" type="button" value="Отметить текущую" title="Отметить текущую задачу выполненной" />
             </div>
         </div>
+        <div class="mmobj-body" id="mmobj-page-director" style="display:none;"></div>
     </div>`;
 }
 
@@ -919,6 +957,8 @@ export function initObjective(ctx) {
     createButton();
     wireEvents();
     loadSettings();
+
+    try { initDirector(ctx); } catch (e) { console.warn("[Механик машин] initDirector:", e); }
 
     const es = ctx?.eventSource || eventSource;
     const et = ctx?.eventTypes || event_types;

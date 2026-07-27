@@ -23,6 +23,7 @@ import {
     name2,
 } from "../../../../script.js";
 import { extension_settings } from "../../../extensions.js";
+import { mmEnqueue } from "./mmQueue.js";
 
 const API = "/api/plugins/soul-md";
 const BTN_ID = "mm-souldiary-button";
@@ -307,6 +308,7 @@ async function updateMemory(deep = false) {
     trackerBusy = true;
     internalGen = true;
     try {
+        await mmEnqueue(async () => {
         const c = cfg();
         const recent = recentDialogue(deep ? c.deepWindow : c.autoWindow);
         const vars = { char: name2, user: name1, recent };
@@ -367,6 +369,7 @@ async function updateMemory(deep = false) {
             }
             progSet("topics", "done");
         } catch (e) { result.fail.push(`Темы: ${e?.message || e}`); progSet("topics", "fail"); }
+        });
     } finally {
         internalGen = false;
         trackerBusy = false;
