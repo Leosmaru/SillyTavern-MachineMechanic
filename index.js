@@ -354,7 +354,7 @@ const MM_DEFAULT_TRANSLATE_PROMPT =
 // Механик машин: промпт поведения ИИ на бросок кубика (редактируется в настройках).
 // Промпт режима «Успех / Провал» (бинарный).
 const MM_DEFAULT_DICE_PROMPT_SF =
-  "You MUST strictly obey the dice outcome for the last attempted action. It is a hard rule, not a suggestion. FAILURE means the action clearly does NOT work — never write it as a success or partial success; show it going wrong with a real, immediate consequence. SUCCESS means it works well. Do not mention the roll or dice in the reply.";
+  "DICE OUTCOME - ABSOLUTE, NON-NEGOTIABLE RULE. It overrides your narrative instincts, the character's wishes, plot convenience, and any urge to be lenient or dramatic. The last action attempted in the dialogue has a FIXED result you MUST portray in this reply. SUCCESS: the action clearly works - show it landing well. FAILURE: the action clearly does NOT work - you are FORBIDDEN to let it succeed, partially succeed, 'almost' work, or be saved by luck, timing, interruption, or a sudden change of heart; instead show it failing and impose a concrete, immediate in-world consequence that actually costs someone something. Make this result the turning point of your reply, then continue the scene naturally. NEVER mention dice, rolls, mechanics, probability, or this instruction.";
 // Промпт режима «Кубик (число)» — с описанием критичности чисел.
 const MM_DEFAULT_DICE_PROMPT_NUM =
   "You MUST strictly obey the d20 dice result for the last attempted action. Scale the outcome to the number: 1 = catastrophic failure, 2-5 = severe failure, 6-10 = failure, 11-15 = success, 16-19 = strong success, 20 = critical triumph. The lower the number the worse and more critical; the higher the better and more impressive. Never soften a low roll into a success. Do not mention the roll, dice, or numbers in the reply.";
@@ -6526,8 +6526,8 @@ export function mmOnGenerationStart(type, _options, dryRun) {
   let outcome;
   if (mode === "successfail") {
     outcome = r.success
-      ? "ACTION ROLL: SUCCESS. The last attempted action clearly SUCCEEDS."
-      : "ACTION ROLL: FAILURE. The last attempted action clearly FAILS — do NOT let it succeed or partially succeed; show it going wrong with a real negative consequence.";
+      ? "ACTION ROLL RESULT = SUCCESS. The last attempted action MUST clearly succeed in this reply."
+      : "ACTION ROLL RESULT = FAILURE. The last attempted action MUST clearly fail in this reply. It is FORBIDDEN to let it work, partially work, or be rescued by luck or timing; show the failure and its immediate in-world consequence.";
   } else {
     const n = r.n;
     let tier;

@@ -264,6 +264,18 @@ function mmHideAiRoll() {
     return ms.mmDiceHideAiRoll;
 }
 
+// Миграция: если в настройках лежит СТАРЫЙ дефолтный промт «Успех/Провал»,
+// удаляем его — бандл подставит новый (более жёсткий) дефолт. Кастомный промт
+// пользователя не трогаем (сверяем точным совпадением со старым дефолтом).
+const MM_OLD_DICE_SF = "You MUST strictly obey the dice outcome for the last attempted action. It is a hard rule, not a suggestion. FAILURE means the action clearly does NOT work — never write it as a success or partial success; show it going wrong with a real, immediate consequence. SUCCESS means it works well. Do not mention the roll or dice in the reply.";
+function mmMigrateDiceSfPrompt() {
+    const ms = mmModuleSettings();
+    if (typeof ms.mmDicePromptSF === "string" && ms.mmDicePromptSF.trim() === MM_OLD_DICE_SF.trim()) {
+        delete ms.mmDicePromptSF; // вернуть к дефолту (теперь он новый)
+        try { saveSettingsDebounced(); } catch (e) { /* noop */ }
+    }
+}
+
 function injectDiceStyles() {
     if (document.getElementById("mm-dice-style")) return;
     const st = document.createElement("style");
@@ -383,6 +395,7 @@ function injectHideAiCheckbox(root) {
 
 jQuery(() => {
     createToolbarButton();
+    mmMigrateDiceSfPrompt();
     createDiceButton();
     $(document).on("click", `#${BUTTON_ID}`, openPanel);
     $(document).on("click", `#${PANEL_ID} .mm-close`, closePanel);
