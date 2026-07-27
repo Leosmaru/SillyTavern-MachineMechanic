@@ -49,18 +49,23 @@ const NARRATOR_STYLES = [
 
 // Определения типов событий (порт таксономии Soul Stage). Редактируются по отдельности,
 // подставляются в промпт вместо {{events}}.
-const EVENT_KEYS = ["encounter", "discovery", "visitor", "twist", "romance", "none"];
+const EVENT_KEYS = ["encounter", "discovery", "visitor", "twist", "romance", "advancement", "none"]; // видит модель ({{events}})
+const CUSTOM_KEY = "custom";
+const FORCE_KEYS = [...EVENT_KEYS.filter((k) => k !== "none"), CUSTOM_KEY]; // кнопки форса (+ custom, без none)
+const DEF_KEYS = [...EVENT_KEYS, CUSTOM_KEY];                                // определения + редактор
 const DEFAULT_EVENT_DEFS = {
     encounter: "a physical threat/action begins RIGHT NOW: attack, chase, ambush. Not a mere hint of danger.",
     discovery: "the hero learns or finds something NEW that changes their understanding. Not a repeat of known info, not a generic item.",
     visitor:   'someone who was not present a turn ago arrives (a new character/NPC). You MUST fill "npc".',
     twist:     "something previously established is revealed to be false or inverted. Rare, high bar.",
     romance:   "a beat of intimacy, a confession, genuine vulnerability. Not flirty banter.",
+    advancement: "a beat that MOVES THE MAIN PLOT forward, chosen to fit THIS character specifically — their backstory, personality, ties and goals (from CHARACTER below, lore and the story so far) and the active GOAL. Not random: a natural next step that develops the character's arc or the central situation.",
     none:      "everything else: calm conversation, atmosphere, routine.",
+    custom:    "",
 };
 
 // Версия дефолтного промпта/определений. Бампни — и при загрузке форс-сбросит к новым дефолтам.
-const PROMPT_VER = 2;
+const PROMPT_VER = 3;
 
 // Ритм событий — меняется ПРЕСЕТОМ. Остальной промпт общий (buildPrompt).
 const PACING_BALANCED =
@@ -94,6 +99,9 @@ ACTIVE GOAL AND TASKS:
 
 RECENT MESSAGES:
 {{recent}}
+
+CHARACTER {{char}} (card/lore — use especially for "advancement"):
+{{char_info}}
 
 EVENT TYPES (pick one for event_type):
 {{events}}
@@ -135,7 +143,7 @@ function dcfg() {
     if (typeof c.prompt !== "string" || !c.prompt) c.prompt = DEFAULT_PROMPT;
     if (typeof c.preset !== "string" || !PRESETS[c.preset]) c.preset = PRESET_KEYS[0]; // текущий пресет ритма
     if (typeof c.eventDefs !== "object" || !c.eventDefs) c.eventDefs = {};      // определения типов событий
-    for (const k of EVENT_KEYS) if (typeof c.eventDefs[k] !== "string") c.eventDefs[k] = DEFAULT_EVENT_DEFS[k];
+    for (const k of DEF_KEYS) if (typeof c.eventDefs[k] !== "string") c.eventDefs[k] = DEFAULT_EVENT_DEFS[k];
     return c;
 }
 function saveCfg() { saveSettingsDebounced(); }
@@ -215,7 +223,7 @@ function pageHtml() {
     const styleOptions = NARRATOR_STYLES
         .map((s) => `<option value="${s.replace(/"/g, "&quot;")}">${s}</option>`)
         .join("");
-    const forceButtons = EVENT_KEYS.filter((k) => k !== "none")
+    const forceButtons = FORCE_KEYS
         .map((k) => { const [lbl] = EVENT_THEME[k] || EVENT_THEME.none; return `<input type="button" class="menu_button mmdir-force" data-ev="${k}" value="${lbl}" />`; })
         .join("");
     return `
@@ -319,11 +327,11 @@ async function refreshWorld() {
 // ---------------------------------------------------------------------------
 function editPrompt() {
     const c = dcfg();
-    const evRows = EVENT_KEYS.map((k) => {
+    const evRows = DEF_KEYS.map((k) => {
         const [label] = EVENT_THEME[k] || EVENT_THEME.none;
         return `<details class="mmobj-help" style="margin-top:6px;">
             <summary>${label} — <code>${k}</code></summary>
-            <textarea id="mmdir-def-${k}" class="text_pole textarea_compact" rows="3"></textarea>
+            <textarea id="mmdir-def-${k}" class="text_pole textarea_compact" rows="3"${k === CUSTOM_KEY ? ' placeholder="Своё событие: опиши, что должно произойти. Пусто = не используется. Вызывается только кнопкой ✦ СВОЁ."' : ''}></textarea>
             <div class="objective_prompt_block" style="margin-top:4px;">
                 <input id="mmdir-def-reset-${k}" class="menu_button" type="submit" value="Сбросить" />
                 <input id="mmdir-def-tr-${k}" class="menu_button" type="button" value="🌐 Перевести" />
@@ -360,7 +368,7 @@ function editPrompt() {
     $("#mmdir-prompt-reset").on("click", () => { dcfg().prompt = DEFAULT_PROMPT; saveCfg(); $("#mmdir-prompt-text").val(DEFAULT_PROMPT); });
     wireTr("mmdir-prompt-tr", "mmdir-prompt-text", "mmdir-prompt-trout");
 
-    for (const k of EVENT_KEYS) {
+    for (const k of DEF_KEYS) {
         $(`#mmdir-def-${k}`).val(c.eventDefs[k]).on("input", () => { dcfg().eventDefs[k] = String($(`#mmdir-def-${k}`).val()); saveCfg(); });
         $(`#mmdir-def-reset-${k}`).on("click", () => { dcfg().eventDefs[k] = DEFAULT_EVENT_DEFS[k]; saveCfg(); $(`#mmdir-def-${k}`).val(DEFAULT_EVENT_DEFS[k]); });
         wireTr(`mmdir-def-tr-${k}`, `mmdir-def-${k}`, `mmdir-def-trout-${k}`);
@@ -437,6 +445,20 @@ function recentDialogue(n) {
     return list.slice(-Math.max(1, n)).map((m) => `${m.is_user ? name1 : name2}: ${(m.mes || "").trim()}`).join("\n");
 }
 
+// карточка персонажа (описание/личность/сценарий) — режиссёр её иначе не видит (голый generateRaw)
+function charInfo() {
+    try {
+        const ctx = (typeof SillyTavern !== "undefined" && SillyTavern.getContext) ? SillyTavern.getContext() : ctxRef;
+        const ch = ctx?.characters?.[ctx.characterId];
+        if (!ch) return "";
+        const parts = [];
+        if (ch.description) parts.push(String(ch.description));
+        if (ch.personality) parts.push("Personality: " + ch.personality);
+        if (ch.scenario) parts.push("Scenario: " + ch.scenario);
+        return parts.join("\n").slice(0, 1500);
+    } catch (e) { return ""; }
+}
+
 function renderPrompt(tpl, ws) {
     const c = dcfg();
     return String(tpl || "")
@@ -446,6 +468,7 @@ function renderPrompt(tpl, ws) {
         .replace(/{{objective}}/g, objectiveText())
         .replace(/{{recent}}/g, recentDialogue(8) || "(нет)")
         .replace(/{{style}}/g, c.style)
+        .replace(/{{char_info}}/g, charInfo() || "(no card data)")
         .replace(/{{events}}/g, EVENT_KEYS.map((k) => `- ${k} — ${c.eventDefs[k]}`).join("\n"));
 }
 
@@ -496,7 +519,12 @@ async function directorPass(forceType = null) {
         progShow(forceType ? `Режиссёр: событие «${forceType}»…` : "Режиссёр смотрит на сцену…");
         const ws = parseWS(await worldLoad());
         let prompt = renderPrompt(dcfg().prompt, ws);
-        if (forceType) prompt += `\n\nMANDATORY THIS TURN: event_type MUST be "${forceType}". Produce a strong, concrete event_text for it (fill "npc" if visitor). Do NOT return "none".`;
+        if (forceType === CUSTOM_KEY) {
+            const cd = String(dcfg().eventDefs.custom || "").trim();
+            prompt += `\n\nMANDATORY THIS TURN: produce an event exactly per this instruction: ${cd || "invent a fitting, plot-relevant event"}. Set "event_type" to "custom" and write a strong concrete event_text. Do NOT return "none".`;
+        } else if (forceType) {
+            prompt += `\n\nMANDATORY THIS TURN: event_type MUST be "${forceType}". Produce a strong, concrete event_text for it (fill "npc" if visitor). Do NOT return "none".`;
+        }
         const raw = await generateRaw({ prompt, systemPrompt: dirSys(), responseLength: dcfg().maxTokens });
         const plan = parsePlan(raw);
         if (plan) {
@@ -541,7 +569,9 @@ const EVENT_THEME = {
     visitor:   ["🚪 ГОСТЬ", "80,110,230"],
     twist:     ["🌀 ПОВОРОТ", "40,190,200"],
     romance:   ["💗 МОМЕНТ", "220,80,150"],
+    advancement: ["➡ ПРОДВИЖЕНИЕ", "110,90,210"],
     none:      ["🎬 событие", "180,80,220"],
+    custom:    ["✦ СВОЁ", "150,150,160"],
 };
 
 const normEv = (v) => (v && typeof v === "object") ? { text: v.text || "", type: v.type || "none" } : { text: String(v || ""), type: "none" };
