@@ -2,6 +2,15 @@
 
 **← [Back to README](readme.md)**
 
+## Форк «Механик машин»
+
+### 2026-07-27
+- НОВОЕ: 🎯 Цели (Objective) — встроенный порт расширения Objective. Кнопка 🎯 у поля
+  ввода рядом с 🔧🎲🧠; панель с интерфейсом на русском и встроенной инструкцией
+  «Как пользоваться». Авто-генерация задач, ветвление, кастомные промпты, `/taskcheck`.
+  Данные общие с `chat_metadata.objective`; id с префиксом `mmobj-` (не конфликтует
+  со standalone). Файл `objective.js`, подключён в `machineMechanic.js`.
+
 ## v6.12.0 (June 10, 2026)
 - NEW FEATURE: Additional Context allows you to add context to memories. You must create a profile (you cannot add them to "Current SillyTavern Settings".)
 

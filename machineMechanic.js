@@ -16,6 +16,7 @@ import { initMemoryTuning } from "./memoryTuning.js";
 import { initErrorHints } from "./errorHints.js";
 import { initStatBar } from "./statBar.js";
 import { initSoulDiary } from "./soulDiary.js";
+import { initObjective } from "./objective.js";
 import { extension_settings } from "../../../extensions.js";
 import { saveSettingsDebounced } from "../../../../script.js";
 
@@ -497,5 +498,12 @@ jQuery(() => {
         console.warn("[Механик машин] Не удалось инициализировать дневник души:", e);
     }
 
-    console.log("[Механик машин] Готово: 🔧 интерфейс + 🌐 перевод + 🎲 кубик + 🏷️ бейджи + 📖 оглавление + 🧠 дневник.");
+    // Цели (🎯): задачи для ИИ по ходу ролеплея (встроенный Objective).
+    try {
+        initObjective(ctx);
+    } catch (e) {
+        console.warn("[Механик машин] Не удалось инициализировать цели:", e);
+    }
+
+    console.log("[Механик машин] Готово: 🔧 интерфейс + 🌐 перевод + 🎲 кубик + 🏷️ бейджи + 📖 оглавление + 🧠 дневник + 🎯 цели.");
 });
