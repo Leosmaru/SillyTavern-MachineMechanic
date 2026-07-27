@@ -16,6 +16,8 @@ import { initMemoryTuning } from "./memoryTuning.js";
 import { initErrorHints } from "./errorHints.js";
 import { initStatBar } from "./statBar.js";
 import { initSoulDiary } from "./soulDiary.js";
+import { extension_settings } from "../../../extensions.js";
+import { saveSettingsDebounced } from "../../../../script.js";
 
 const PANEL_ID = "mm-panel";
 const BUTTON_ID = "mm-wand-button";
@@ -238,8 +240,82 @@ function watchTranslateButtons() {
     }).observe(chat, { childList: true });
 }
 
+// ----------------------------------------------------------------------------
+// Кубик 🎲: значок у «Отправить» (вкл/выкл) + СКРЫТЫЙ бросок.
+// Бросок делается заранее перед генерацией и уходит модели инъекцией; юзеру
+// не показывается вообще. «Перегенерить» → новый бросок (флаг остаётся включён).
+// ----------------------------------------------------------------------------
+// false = бросок не показывается юзеру (только инъекция в модель — как ты просил);
+// true  = вернуть прежнее поведение (число над сообщением). Меняется тут.
+const MM_DICE_SHOW_ROLL = false;
+const DICE_BTN_ID = "mm-dice-button";
+
+// тот же путь настроек, что читает бандл: extension_settings.STMemoryBooks.moduleSettings
+function mmModuleSettings() {
+    const root = extension_settings.STMemoryBooks || (extension_settings.STMemoryBooks = {});
+    return root.moduleSettings || (root.moduleSettings = {});
+}
+
+function injectDiceStyles() {
+    if (document.getElementById("mm-dice-style")) return;
+    const st = document.createElement("style");
+    st.id = "mm-dice-style";
+    st.textContent = `
+        #${DICE_BTN_ID} { opacity: .5; transition: opacity .15s, color .15s; }
+        #${DICE_BTN_ID}.mm-dice-on { opacity: 1; color: var(--SmartThemeQuoteColor, #7096b8); }
+        ${MM_DICE_SHOW_ROLL ? "" : ".mm-dice, .mm-dice-above { display: none !important; }"}
+    `;
+    document.head.appendChild(st);
+}
+
+function updateDiceButton(btn) {
+    const on = !!mmModuleSettings().mmDiceEnabled;
+    btn.classList.toggle("mm-dice-on", on);
+    btn.title = on
+        ? "🎲 Кубик ВКЛ — следующая генерация со скрытым броском. Клик — выключить."
+        : "🎲 Кубик выкл. Клик — включить (скрытый бросок на каждую генерацию).";
+}
+
+function createDiceButton() {
+    injectDiceStyles();
+    if (document.getElementById(DICE_BTN_ID)) return;
+    const btn = document.createElement("div");
+    btn.id = DICE_BTN_ID;
+    btn.className = "fa-solid fa-dice-d20 interactable";
+    btn.tabIndex = 0;
+    btn.addEventListener("click", () => {
+        const ms = mmModuleSettings();
+        ms.mmDiceEnabled = !ms.mmDiceEnabled;
+        try { saveSettingsDebounced(); } catch (e) { /* noop */ }
+        updateDiceButton(btn);
+        // синхронизировать чекбокс в панели действий, если она открыта
+        const chk = document.querySelector(".mm-dice-toggle .mm-dice-check");
+        if (chk) chk.checked = ms.mmDiceEnabled;
+        if (typeof toastr !== "undefined") {
+            toastr.info(ms.mmDiceEnabled ? "🎲 Кубик включён" : "🎲 Кубик выключен", "Механик машин");
+        }
+    });
+
+    const wrench = document.getElementById(BUTTON_ID);            // 🔧
+    const wand = document.getElementById("extensionsMenuButton"); // палочка
+    if (wrench) wrench.after(btn);
+    else if (wand) wand.after(btn);
+    else document.getElementById("leftSendForm")?.appendChild(btn);
+
+    const wandOrder = wand ? (parseInt(getComputedStyle(wand).order, 10) || 4) : 4;
+    btn.style.order = String(wandOrder + 2); // после 🔧 (order+1)
+    updateDiceButton(btn);
+}
+
+// убрать любые визуальные блоки броска из чата (скрытый режим)
+function mmStripDiceBlocks() {
+    const chat = document.getElementById("chat");
+    if (chat) chat.querySelectorAll(".mm-dice-above, .mm-dice").forEach((n) => n.remove());
+}
+
 jQuery(() => {
     createToolbarButton();
+    createDiceButton();
     $(document).on("click", `#${BUTTON_ID}`, openPanel);
     $(document).on("click", `#${PANEL_ID} .mm-close`, closePanel);
     watchTranslateButtons();
@@ -249,13 +325,28 @@ jQuery(() => {
         ? SillyTavern.getContext() : null;
     if (ctx?.eventSource && ctx?.eventTypes) {
         // Перед генерацией — кинуть кубик и отдать результат в промпт (инъекция).
+        // В скрытом режиме сразу убираем превью-блок, чтобы юзер броска не видел.
         ctx.eventSource.on(ctx.eventTypes.GENERATION_STARTED, (type, options, dryRun) => {
-            try { mmOnGenerationStart(type, options, dryRun); } catch (e) { /* noop */ }
+            try {
+                mmOnGenerationStart(type, options, dryRun);
+                if (!MM_DICE_SHOW_ROLL) mmStripDiceBlocks();
+            } catch (e) { /* noop */ }
         });
-        // После ответа — показать под сообщением то число, что ушло в ИИ.
+        // После ответа — показать число только если включён видимый режим.
         const rendered = ctx.eventTypes.CHARACTER_MESSAGE_RENDERED || ctx.eventTypes.MESSAGE_RECEIVED;
         ctx.eventSource.on(rendered, (id) => {
-            try { mmShowRollOnMessage(id); } catch (e) { /* noop */ }
+            try {
+                if (MM_DICE_SHOW_ROLL) mmShowRollOnMessage(id);
+                else mmStripDiceBlocks();
+            } catch (e) { /* noop */ }
+        });
+        // Значок у «Отправить» пересоздаём при смене чата; синхроним с чекбоксом панели.
+        if (ctx.eventTypes.CHAT_CHANGED) {
+            ctx.eventSource.on(ctx.eventTypes.CHAT_CHANGED, () => createDiceButton());
+        }
+        $(document).on("change click", ".mm-dice-check", () => {
+            const b = document.getElementById(DICE_BTN_ID);
+            if (b) updateDiceButton(b);
         });
     }
 
