@@ -121,9 +121,17 @@ function parseMarker(text, name) {
     const m = String(text || "").match(markerRe(name));
     return m ? { val: parseInt(m[1], 10), reason: clipReason(m[2]) } : null;
 }
-function stripMarkers(text, names) {
+// Подстраховка: любая метка ВИДА [[Слово:Число]] / [[Слово:Число|текст]], чьё
+// имя мы не знаем. Ловит два реальных случая: стат переименовали (в старых
+// сообщениях лежат метки со старым именем) и модель придумала имя сама.
+// Имя ограничено 32 символами без скобок и двоеточий — чтобы не съесть
+// случайный текст в квадратных скобках.
+const ANY_MARKER_RE = /\[\[\s*[^[\]:|\n]{1,32}?\s*:\s*-?\d+\s*(?:[|,;:\-–—]\s*[^\]\n]*)?\]\]/gi;
+
+function stripMarkers(text, names, greedy = false) {
     let t = String(text || "");
     for (const n of names) t = t.replace(markerRe(n, true), "");
+    if (greedy) t = t.replace(ANY_MARKER_RE, "");
     return t;
 }
 
@@ -133,7 +141,10 @@ function stripMarkers(text, names) {
 // Сам чат не трогаем — метки в сообщениях и есть «память» модели о прошлом значении.
 export function stripStatMarkers(text) {
     if (!text || !String(text).includes("[[")) return text;
-    return stripMarkers(text, allNames(cfg()));
+    const c = cfg();
+    // Жадно — только когда модуль включён: иначе рискуем съесть чужой текст
+    // в двойных скобках у того, кто полосками не пользуется.
+    return stripMarkers(text, allNames(c), !!c.enabled);
 }
 function clipReason(s) {
     let t = String(s || "").replace(/[\r\n|\]]+/g, " ").replace(/\s+/g, " ").trim();
