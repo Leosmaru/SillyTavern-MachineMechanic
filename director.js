@@ -129,6 +129,55 @@ const PRESETS = {
 const PRESET_KEYS = Object.keys(PRESETS);
 const DEFAULT_PROMPT = PRESETS[PRESET_KEYS[0]];
 
+// Промпт «Раскрыть NPC» — из краткого наброска режиссёра лепит полноценную карточку
+// (по принципам гайда character card), опираясь на контекст истории. Редактируется в UI.
+const DEFAULT_NPC_PROMPT =
+`Write a compact CHARACTER CARD for a minor character named {{name}}, so {{char}} can portray them consistently in a solo roleplay with {{user}}. Ground everything in the world, the story so far and {{char}}'s own card. Write in the LANGUAGE OF THE STORY. Vivid but tight — a working card, not an essay. No contradictions.
+
+Produce these labeled blocks:
+- Description: defining appearance, how they carry themselves, one memorable quirk.
+- Personality: core motivation, a real fear, moral bent, how they treat others — declarative rules {{char}} can follow.
+- Manner of speech: vocabulary, rhythm, verbal tics — so their voice is instantly recognizable.
+- Role & relationship to {{user}}: why they are in this scene and how they regard {{user}} right now.
+
+BRIEF (how the director introduced them): {{name}} — {{brief}}
+
+CURRENT WORLD:
+{{world}}
+
+STORY SO FAR:
+{{recent}}
+
+{{char}}'s card (for tone and setting consistency):
+{{char_info}}
+
+Output ONLY the card as plain labeled lines — no JSON, no code fences, no preamble, no opening line or greeting.`;
+
+// «Мега-прокачка» — полное, богатое досье по всем разделам гайда (дороже по токенам).
+const DEFAULT_NPC_MEGA_PROMPT =
+`Write a FULL, richly-detailed CHARACTER CARD for {{name}}, a character in an ongoing solo roleplay with {{user}}, so {{char}} can portray them vividly and consistently. Apply the craft of an excellent character card. Ground everything in the world, the story so far and {{char}}'s own card. Write in the LANGUAGE OF THE STORY. No contradictions.
+
+Produce these labeled blocks, each properly fleshed out:
+- Description: a vivid at-a-glance snapshot — defining appearance, demeanor, one memorable quirk.
+- Personality: core motivations, a deep fear, moral alignment, behavioral rules and how they treat others — declarative and detailed.
+- Backstory: a few concrete beats of who they are and how they got here, consistent with the world.
+- Manner of speech: vocabulary, rhythm, verbal tics, what they never say — so their voice is unmistakable.
+- Role & relationship to {{user}}: why they are in this scene, their goal here, and how they regard {{user}} right now.
+- Sample lines: 2-3 short in-character lines (each with a brief action in *asterisks*) that show their voice.
+
+BRIEF (how the director introduced them): {{name}} — {{brief}}
+
+CURRENT WORLD:
+{{world}}
+
+STORY SO FAR:
+{{recent}}
+
+{{char}}'s card (for tone and setting consistency):
+{{char_info}}
+
+Output ONLY the card as plain labeled blocks — no JSON, no code fences, no preamble, no opening greeting.`;
+
 // ---------------------------------------------------------------------------
 // Настройки (как cfg() у 🧠, но своя ветка mm_director)
 // ---------------------------------------------------------------------------
@@ -143,6 +192,9 @@ function dcfg() {
     if (c.eventMode !== "now" && c.eventMode !== "announce") c.eventMode = "now"; // показ: now (сразу) | announce (плашка сейчас, событие след. генерацией)
     if (typeof c.hardDirective !== "boolean") c.hardDirective = false;            // жёсткая директива (заставлять модель) — по умолч. ВЫКЛ
     if (typeof c.npc !== "boolean") c.npc = false;                                // NPC-реестр (лорбук + режиссёр вводит/выводит) — по умолч. ВЫКЛ
+    if (typeof c.npcMega !== "boolean") c.npcMega = false;                        // кнопка «Прокачать» делает мега-досье (иначе среднее) — по умолч. ВЫКЛ
+    if (typeof c.npcPrompt !== "string" || !c.npcPrompt) c.npcPrompt = DEFAULT_NPC_PROMPT;         // промпт «средняя прокачка»
+    if (typeof c.npcMegaPrompt !== "string" || !c.npcMegaPrompt) c.npcMegaPrompt = DEFAULT_NPC_MEGA_PROMPT; // промпт «мега-прокачка»
     if (typeof c.showWorld !== "boolean") c.showWorld = false;                    // давать персонажу состояние мира (World.md → промпт, SYSTEM-фон) — по умолч. ВЫКЛ
     // при апгрейде версии промпта — один раз форс-сброс промпта и определений к новым (английским) дефолтам
     if (c.promptVer !== PROMPT_VER) { c.prompt = DEFAULT_PROMPT; c.eventDefs = { ...DEFAULT_EVENT_DEFS }; c.preset = PRESET_KEYS[0]; c.promptVer = PROMPT_VER; }
@@ -234,15 +286,17 @@ async function npcUpsert(name, archetype, personality, { enable = true } = {}) {
     const lb = await ensureLorebook(); if (!lb) return false;
     const data = await loadWorldInfo(lb); if (!data || !data.entries) return false;
     let e = findNpcEntry(data, name);
+    const isNew = !e;
     if (!e) { e = createWorldInfoEntry(lb, data); if (!e) return false; }
     e[NPC_FLAG] = true; e.mm_npc_name = name;
     e.key = [name]; e.comment = npcComment(name);
-    if (personality || archetype || !e.content) e.content = npcCard(name, archetype, personality);
+    // содержимое пишем ТОЛЬКО при создании; возврат по имени и ручные правки карточки — сохраняем
+    if (isNew) e.content = npcCard(name, archetype, personality);
     e.constant = true; e.vectorized = false; e.selective = false;
     e.position = NPC_POS_ATDEPTH; e.depth = 4; e.role = 0; e.addMemo = true;
     if (enable) e.disable = false;
     await saveWorldInfo(lb, data, true);
-    return true;
+    return isNew ? "created" : "updated";
 }
 // вкл/выкл запись (выход = disable:true; возврат = disable:false)
 async function npcSetDisabled(name, disabled) {
@@ -275,6 +329,41 @@ async function npcList() {
     }));
 }
 async function npcActiveNames() { return (await npcList()).filter((n) => !n.disabled).map((n) => n.name); }
+
+// «Прокачать» NPC: короткую карточку режиссёра превращает в досье отдельной генерацией.
+// Тир: "medium" (средняя) или "mega" (полное досье). Пишется в ту же запись (constant, глубина 4).
+// Только вручную кнопкой; язык — как в истории чата. Промпты редактируемые (c.npcPrompt / c.npcMegaPrompt).
+function renderNpcTpl(tpl, name, brief, ws) {
+    return String(tpl || DEFAULT_NPC_PROMPT)
+        .replace(/{{name}}/g, name || "the character")
+        .replace(/{{brief}}/g, brief || "(no details yet)")
+        .replace(/{{char}}/g, name2 || "персонаж")
+        .replace(/{{user}}/g, name1 || "игрок")
+        .replace(/{{world}}/g, renderWSForPrompt(ws) || "(мир пуст)")
+        .replace(/{{recent}}/g, recentDialogue(8) || "(нет)")
+        .replace(/{{char_info}}/g, charInfo() || "(no card data)");
+}
+async function npcFleshOut(name, { tier = "medium", queued = false } = {}) {
+    name = String(name || "").trim();
+    if (!name || typeof generateRaw !== "function") return false;
+    const run = async () => {
+        try {
+            progShow(`Режиссёр ${tier === "mega" ? "делает мега-досье" : "прокачивает"}: ${name}…`);
+            const c = dcfg();
+            const cur = (await npcList()).find((n) => n.name === name);
+            const ws = parseWS(await worldLoad());
+            const tpl = tier === "mega" ? c.npcMegaPrompt : c.npcPrompt;
+            const sys = `You are a character-sheet writer for a solo roleplay. Output ONLY the card as plain labeled lines — no JSON, no code fences, no preamble, never refuse.` + UNCENSORED;
+            const len = tier === "mega" ? Math.max(900, c.maxTokens) : Math.max(400, c.maxTokens);
+            const raw = await generateRaw({ prompt: renderNpcTpl(tpl, name, cur?.content || "", ws), systemPrompt: sys, responseLength: len });
+            const card = String(raw || "").trim().replace(/^```[a-z]*\s*|\s*```$/gi, "").trim();
+            if (card) { await npcSaveCard(name, name, card); renderNpcList(); try { toastr.success("Готово: " + name, "🎭 NPC"); } catch (e) {} }
+        } catch (e) { console.warn("[Режиссёр] прокачка NPC:", e); }
+        finally { progDone(); }
+    };
+    if (queued) await mmEnqueue(run); else await run();
+    return true;
+}
 
 // ---------------------------------------------------------------------------
 // Индикатор «режиссёр обновляет мир» (паттерн прогресс-бара 🧠)
@@ -388,7 +477,8 @@ function pageHtml() {
     <hr class="m-t-1 m-b-1">
 
     <label class="checkbox_label"><input id="mmdir-npc" type="checkbox"> NPC-реестр (режиссёр вводит/выводит персонажей)</label>
-    <small style="opacity:.75; display:block; margin-top:2px;">Новых персонажей режиссёр заводит записью в лорбуке чата (constant, тихо на глубине). Ушёл — запись гаснет, но остаётся (клик вернёт). Память-саммари их не трогает. Клик по имени — на сцену/со сцены, ✎ — правка.</small>
+    <small style="opacity:.75; display:block; margin-top:2px;">Новых персонажей режиссёр заводит короткой записью в лорбуке чата (constant, тихо на глубине). Ушёл — гаснет, но остаётся (клик вернёт). Память-саммари их не трогает. Клик по имени — на сцену/со сцены, ✨/🚀 — прокачать карточку (вручную), ✎ — правка.</small>
+    <label class="checkbox_label" style="margin-top:4px;"><input id="mmdir-npc-mega" type="checkbox"> 🚀 Мега-прокачка — кнопка «Прокачать» делает полное досье вместо среднего</label>
     <div id="mmdir-npc-list" style="margin-top:6px; display:flex; flex-direction:column; gap:4px;"></div>
     <div class="objective_block flex-container" style="margin-top:6px;">
         <input id="mmdir-npc-refresh" class="menu_button" type="button" value="Обновить список" />
@@ -441,6 +531,12 @@ async function renderNpcList() {
         chip.title = n.disabled ? "Выключен — клик вернёт на сцену" : "На сцене — клик уберёт";
         chip.style.cssText = `cursor:pointer; padding:2px 10px; border-radius:12px; font-size:.9em; white-space:nowrap; border:1px solid rgba(120,160,230,${n.disabled ? ".25" : ".6"}); background:rgba(120,160,230,${n.disabled ? ".06" : ".18"}); opacity:${n.disabled ? ".55" : "1"};`;
         chip.addEventListener("click", async () => { await npcSetDisabled(n.name, !n.disabled); renderNpcList(); });
+        const mega = dcfg().npcMega;
+        const flesh = document.createElement("span");
+        flesh.className = "fa-solid " + (mega ? "fa-rocket" : "fa-wand-magic-sparkles") + " interactable";
+        flesh.title = mega ? "Мега-прокачка — полное досье" : "Прокачать — карточка (средняя)";
+        flesh.style.cssText = "cursor:pointer; opacity:.7;";
+        flesh.addEventListener("click", () => npcFleshOut(n.name, { tier: mega ? "mega" : "medium", queued: true }));
         const edit = document.createElement("span");
         edit.className = "fa-solid fa-pencil interactable";
         edit.title = "Редактировать персонажа";
@@ -449,7 +545,7 @@ async function renderNpcList() {
         const desc = document.createElement("small");
         desc.style.cssText = "opacity:.6; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0;";
         desc.textContent = n.content;
-        row.appendChild(chip); row.appendChild(edit); row.appendChild(desc);
+        row.appendChild(chip); row.appendChild(flesh); row.appendChild(edit); row.appendChild(desc);
         host.appendChild(row);
     }
 }
@@ -527,6 +623,22 @@ function editPrompt() {
         </div>
         <div id="mmdir-prompt-trout" style="opacity:.8;margin-top:3px;"></div>
         <hr class="m-t-1 m-b-1">
+        <label>Промпт «✨ Прокачать» — средняя карточка NPC. Плейсхолдеры: {{name}}, {{brief}}, {{char}}, {{user}}, {{world}}, {{recent}}, {{char_info}}.</label>
+        <textarea id="mmdir-npcprompt-text" class="text_pole textarea_compact" rows="12"></textarea>
+        <div class="objective_prompt_block" style="margin-top:6px;">
+            <input id="mmdir-npcprompt-reset" class="menu_button" type="submit" value="Сбросить" />
+            <input id="mmdir-npcprompt-tr" class="menu_button" type="button" value="🌐 Перевести" />
+        </div>
+        <div id="mmdir-npcprompt-trout" style="opacity:.8;margin-top:3px;"></div>
+        <hr class="m-t-1 m-b-1">
+        <label>Промпт «🚀 Мега-прокачка» — полное досье NPC. Те же плейсхолдеры.</label>
+        <textarea id="mmdir-npcmega-text" class="text_pole textarea_compact" rows="14"></textarea>
+        <div class="objective_prompt_block" style="margin-top:6px;">
+            <input id="mmdir-npcmega-reset" class="menu_button" type="submit" value="Сбросить" />
+            <input id="mmdir-npcmega-tr" class="menu_button" type="button" value="🌐 Перевести" />
+        </div>
+        <div id="mmdir-npcmega-trout" style="opacity:.8;margin-top:3px;"></div>
+        <hr class="m-t-1 m-b-1">
         <label>Типы событий (подставляются в {{events}}) — читать/править каждый</label>
         ${evRows}
     </div>`;
@@ -543,6 +655,12 @@ function editPrompt() {
     $("#mmdir-prompt-text").val(c.prompt).on("input", () => { dcfg().prompt = String($("#mmdir-prompt-text").val()); saveCfg(); });
     $("#mmdir-prompt-reset").on("click", () => { dcfg().prompt = DEFAULT_PROMPT; saveCfg(); $("#mmdir-prompt-text").val(DEFAULT_PROMPT); });
     wireTr("mmdir-prompt-tr", "mmdir-prompt-text", "mmdir-prompt-trout");
+    $("#mmdir-npcprompt-text").val(c.npcPrompt).on("input", () => { dcfg().npcPrompt = String($("#mmdir-npcprompt-text").val()); saveCfg(); });
+    $("#mmdir-npcprompt-reset").on("click", () => { dcfg().npcPrompt = DEFAULT_NPC_PROMPT; saveCfg(); $("#mmdir-npcprompt-text").val(DEFAULT_NPC_PROMPT); });
+    wireTr("mmdir-npcprompt-tr", "mmdir-npcprompt-text", "mmdir-npcprompt-trout");
+    $("#mmdir-npcmega-text").val(c.npcMegaPrompt).on("input", () => { dcfg().npcMegaPrompt = String($("#mmdir-npcmega-text").val()); saveCfg(); });
+    $("#mmdir-npcmega-reset").on("click", () => { dcfg().npcMegaPrompt = DEFAULT_NPC_MEGA_PROMPT; saveCfg(); $("#mmdir-npcmega-text").val(DEFAULT_NPC_MEGA_PROMPT); });
+    wireTr("mmdir-npcmega-tr", "mmdir-npcmega-text", "mmdir-npcmega-trout");
 
     for (const k of DEF_KEYS) {
         $(`#mmdir-def-${k}`).val(c.eventDefs[k]).on("input", () => { dcfg().eventDefs[k] = String($(`#mmdir-def-${k}`).val()); saveCfg(); });
@@ -764,7 +882,7 @@ async function directorPass(forceType = null) {
             if (dcfg().npc) {
                 try {
                     const np = plan.npc;
-                    if (np && np.name) await npcUpsert(np.name, np.archetype, np.personality, { enable: true }); // вход
+                    if (np && np.name) await npcUpsert(np.name, np.archetype, np.personality, { enable: true }); // вход (карточка короткая; «прокачка» — вручную кнопкой)
                     const rem = plan.npc_remove;
                     if (Array.isArray(rem)) for (const nm of rem) { if (nm) await npcSetDisabled(nm, true); }      // выход → гасим
                     if (np?.name || (Array.isArray(rem) && rem.length)) renderNpcList();
@@ -938,6 +1056,8 @@ export function initDirector(ctx) {
     if (hd) hd.checked = c.hardDirective;
     const npccb = document.getElementById("mmdir-npc");
     if (npccb) npccb.checked = c.npc;
+    const npcm = document.getElementById("mmdir-npc-mega");
+    if (npcm) npcm.checked = c.npcMega;
     const sw = document.getElementById("mmdir-showworld");
     if (sw) sw.checked = c.showWorld;
 
@@ -965,6 +1085,7 @@ export function initDirector(ctx) {
     $(document).on("change.mmdir", "#mmdir-eventmode", () => { dcfg().eventMode = String($("#mmdir-eventmode").val()); saveCfg(); });
     $(document).on("change.mmdir", "#mmdir-hard", () => { dcfg().hardDirective = $("#mmdir-hard").prop("checked"); saveCfg(); });
     $(document).on("change.mmdir", "#mmdir-npc", () => { dcfg().npc = $("#mmdir-npc").prop("checked"); saveCfg(); renderNpcList(); });
+    $(document).on("change.mmdir", "#mmdir-npc-mega", () => { dcfg().npcMega = $("#mmdir-npc-mega").prop("checked"); saveCfg(); renderNpcList(); });
     $(document).on("click.mmdir", "#mmdir-npc-refresh", renderNpcList);
     $(document).on("click.mmdir", "#mmdir-npc-add", addNpc);
     $(document).on("change.mmdir", "#mmdir-showworld", () => { dcfg().showWorld = $("#mmdir-showworld").prop("checked"); saveCfg(); if (!dcfg().showWorld) clearWorldInjection(); });
