@@ -129,6 +129,7 @@ function dcfg() {
     if (typeof c.style !== "string") c.style = NARRATOR_STYLES[0];              // стиль повествования
     if (typeof c.depth !== "number") c.depth = 1;                               // глубина инъекции события
     if (typeof c.maxTokens !== "number") c.maxTokens = 1000;                    // свой лимит токенов на ответ режиссёра (мало → обрыв JSON)
+    if (typeof c.eventMode !== "string") c.eventMode = "inject";                // показ события: inject (вплетать) | message (+ отдельным сообщением)
     // при апгрейде версии промпта — один раз форс-сброс промпта и определений к новым (английским) дефолтам
     if (c.promptVer !== PROMPT_VER) { c.prompt = DEFAULT_PROMPT; c.eventDefs = { ...DEFAULT_EVENT_DEFS }; c.preset = PRESET_KEYS[0]; c.promptVer = PROMPT_VER; }
     if (typeof c.prompt !== "string" || !c.prompt) c.prompt = DEFAULT_PROMPT;
@@ -250,6 +251,14 @@ function pageHtml() {
     <div class="objective_block objective_block_control flex1 flexFlowColumn" style="margin-top:8px;">
         <label for="mmdir-style">Стиль повествования</label>
         <select id="mmdir-style" class="text_pole">${styleOptions}</select>
+    </div>
+
+    <div class="objective_block objective_block_control flex1 flexFlowColumn" style="margin-top:8px;">
+        <label for="mmdir-eventmode">Показ события</label>
+        <select id="mmdir-eventmode" class="text_pole">
+            <option value="inject">Вплетать в ответ (по умолчанию)</option>
+            <option value="message">Отдельным сообщением + вплетать</option>
+        </select>
     </div>
 
     <div class="objective_block objective_block_control flex1 flexFlowColumn" style="margin-top:8px;">
@@ -498,6 +507,7 @@ async function directorPass(forceType = null) {
                 setExtensionPrompt(INJECT_KEY, `[SCENE EVENT — this happens in the scene RIGHT NOW. ${name2 || "The character"} MUST notice it and weave a concrete reaction into this reply. Do not ignore it, do not postpone it]: ${ev}`, 1, dcfg().depth);
                 eventPending = true; lastEventText = ev; lastEventType = plan.event_type || "none";
                 try { toastr.info(ev, "🎬 Событие — впишется в следующий ответ", { timeOut: 6000 }); } catch (e) {}
+                if (dcfg().eventMode === "message") postEventMessage(ev, lastEventType); // опционально: ещё и отдельным пузырём
             } else {
                 setExtensionPrompt(INJECT_KEY, "", 1, dcfg().depth); eventPending = false;
                 try { toastr.info("Спокойный ход, событий нет — мир обновлён", "🎬 Режиссёр", { timeOut: 3000 }); } catch (e) {}
@@ -556,6 +566,33 @@ function buildEventBadge(text, type) {
     });
     div.appendChild(span); div.appendChild(tr);
     return div;
+}
+
+// событие отдельным видимым пузырём в ленте чата (режим eventMode="message"). DOM-only — не в истории и не в модель.
+function postEventMessage(text, type) {
+    try {
+        const chat = document.getElementById("chat");
+        if (!chat || !text) return;
+        const [label, rgb] = EVENT_THEME[type] || EVENT_THEME.none;
+        const wrap = document.createElement("div");
+        wrap.className = "mm-dir-event-msg";
+        wrap.style.cssText = `margin:8px 10px;padding:8px 12px;border-radius:10px;background:rgba(${rgb},.12);border:1px solid rgba(${rgb},.4);border-left:3px solid rgba(${rgb},.85);`;
+        const head = document.createElement("div");
+        head.style.cssText = "display:flex;gap:8px;align-items:center;font-weight:600;opacity:.9;margin-bottom:2px;";
+        const h = document.createElement("span"); h.textContent = label;
+        const tr = document.createElement("span"); tr.className = "fa-solid fa-language interactable"; tr.title = "Перевести / вернуть оригинал"; tr.style.cssText = "cursor:pointer;opacity:.7;margin-left:auto;";
+        const body = document.createElement("div"); body.textContent = text;
+        let ruCache = null, showingRu = false;
+        tr.addEventListener("click", async () => {
+            if (showingRu) { body.textContent = text; showingRu = false; return; }
+            if (ruCache === null) { tr.style.opacity = ".4"; ruCache = await translateRu(text); tr.style.opacity = ".7"; }
+            if (ruCache) { body.textContent = ruCache; showingRu = true; }
+        });
+        head.appendChild(h); head.appendChild(tr);
+        wrap.appendChild(head); wrap.appendChild(body);
+        chat.appendChild(wrap);
+        wrap.scrollIntoView({ behavior: "smooth", block: "end" });
+    } catch (e) {}
 }
 
 // повесить плашку под конкретное сообщение
@@ -627,6 +664,8 @@ export function initDirector(ctx) {
     if (mt) mt.value = c.maxTokens;
     const ps = document.getElementById("mmdir-preset");
     if (ps) { ps.innerHTML = PRESET_KEYS.map((k) => `<option value="${k.replace(/"/g, "&quot;")}">${k}</option>`).join(""); ps.value = c.preset; }
+    const em = document.getElementById("mmdir-eventmode");
+    if (em) em.value = c.eventMode;
 
     // Делегированные обработчики (панель строится один раз).
     $(document).off("change.mmdir click.mmdir input.mmdir");
@@ -649,6 +688,7 @@ export function initDirector(ctx) {
         try { toastr.info("Пресет: " + key, "🎬 Режиссёр"); } catch (e) {}
     });
     $(document).on("click.mmdir", ".mmdir-force", function () { const t = this.getAttribute("data-ev"); if (t) runDirector(t); });
+    $(document).on("change.mmdir", "#mmdir-eventmode", () => { dcfg().eventMode = String($("#mmdir-eventmode").val()); saveCfg(); });
     $(document).on("click.mmdir", "#mmdir-prompt-edit", editPrompt);
     $(document).on("click.mmdir", "#mmdir-world-load", refreshWorld);
     $(document).on("click.mmdir", "#mmdir-world-save", async () => {
