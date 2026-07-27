@@ -31,10 +31,10 @@ let ctxRef = null;
 let onDirectorPage = false;
 let dirBusy = false;      // идёт прогон режиссёра
 let dirCounter = 0;       // сколько ответов до следующего прогона
-let eventPending = false; // висит одноразовая инъекция события
-let lastWasSwipe = false; // последнее сообщение — свайп (пропустить)
-let lastEventText = "";   // текст последнего вброшенного события (для тега под сообщением)
-let lastEventType = "none"; // тип последнего события (для цвета/метки плашки)
+let lastWasSwipe = false; // последнее сообщение — свайп/перегенерация
+let pendingEvent = null;  // {text,type} — событие заряжено, инъекция активна
+let announceEvent = null; // {text,type} — анонсировано (режим announce), ещё не заряжено
+let eventUsed = false;    // pendingEvent уже отыгран свежим ответом (для свайп-фикса и расхода)
 
 const chatId = () => { try { return getCurrentChatId() || ""; } catch (e) { return ""; } };
 
@@ -137,7 +137,8 @@ function dcfg() {
     if (typeof c.style !== "string") c.style = NARRATOR_STYLES[0];              // стиль повествования
     if (typeof c.depth !== "number") c.depth = 1;                               // глубина инъекции события
     if (typeof c.maxTokens !== "number") c.maxTokens = 1000;                    // свой лимит токенов на ответ режиссёра (мало → обрыв JSON)
-    if (typeof c.eventMode !== "string") c.eventMode = "inject";                // показ события: inject (вплетать) | message (+ отдельным сообщением)
+    if (c.eventMode !== "now" && c.eventMode !== "announce") c.eventMode = "now"; // показ: now (сразу) | announce (плашка сейчас, событие след. генерацией)
+    if (typeof c.hardDirective !== "boolean") c.hardDirective = false;            // жёсткая директива (заставлять модель) — по умолч. ВЫКЛ
     // при апгрейде версии промпта — один раз форс-сброс промпта и определений к новым (английским) дефолтам
     if (c.promptVer !== PROMPT_VER) { c.prompt = DEFAULT_PROMPT; c.eventDefs = { ...DEFAULT_EVENT_DEFS }; c.preset = PRESET_KEYS[0]; c.promptVer = PROMPT_VER; }
     if (typeof c.prompt !== "string" || !c.prompt) c.prompt = DEFAULT_PROMPT;
@@ -264,9 +265,10 @@ function pageHtml() {
     <div class="objective_block objective_block_control flex1 flexFlowColumn" style="margin-top:8px;">
         <label for="mmdir-eventmode">Показ события</label>
         <select id="mmdir-eventmode" class="text_pole">
-            <option value="inject">Вплетать в ответ (по умолчанию)</option>
-            <option value="message">Отдельным сообщением + вплетать</option>
+            <option value="now">Настоящее событие (сразу, в сообщении)</option>
+            <option value="announce">Анонс (плашка сейчас, событие — следующей генерацией)</option>
         </select>
+        <label class="checkbox_label" style="margin-top:6px;"><input id="mmdir-hard" type="checkbox"> Жёсткая директива (заставлять модель отыграть)</label>
     </div>
 
     <div class="objective_block objective_block_control flex1 flexFlowColumn" style="margin-top:8px;">
@@ -499,6 +501,32 @@ function parsePlan(raw) {
 }
 
 // ---------------------------------------------------------------------------
+// Жизненный цикл события: зарядка (now/announce), инъекция, расход
+// ---------------------------------------------------------------------------
+function eventDirective(ev) {
+    const who = name2 || "The character";
+    if (dcfg().hardDirective) // жёсткая: заставляем отыграть в этом же ответе
+        return `[SCENE EVENT — this happens in the scene RIGHT NOW. ${who} MUST notice it and weave a concrete reaction into THIS reply. Do not ignore it]: ${ev}`;
+    return `[SCENE EVENT — the following just happened in the scene. ${who} responds to it naturally in the reply]: ${ev}`; // мягкая (по умолч.)
+}
+function setInjection(text) { try { setExtensionPrompt(INJECT_KEY, eventDirective(text), 1, dcfg().depth); } catch (e) {} }
+function clearInjection() { try { setExtensionPrompt(INJECT_KEY, "", 1, dcfg().depth); } catch (e) {} pendingEvent = null; eventUsed = false; }
+
+// зарядить событие: now — сразу инъекция; announce — плашка-анонс сейчас, инъекция на следующем сообщении
+function chargeEvent(ev, type) {
+    type = type || "none";
+    if (dcfg().eventMode === "announce") {
+        announceEvent = { text: ev, type };
+        renderEventBadge(ev, type, true); // анонс-плашка на последнем сообщении
+        try { toastr.info(ev, "🎬 Анонс — событие в следующей генерации", { timeOut: 6000 }); } catch (e) {}
+    } else {
+        pendingEvent = { text: ev, type }; eventUsed = false;
+        setInjection(ev);
+        try { toastr.info(ev, "🎬 Событие — впишется в ответ", { timeOut: 6000 }); } catch (e) {}
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Сам цикл режиссёра: смотрит сцену → обновляет мир + вбрасывает событие
 // ---------------------------------------------------------------------------
 async function runDirector(forceType = null) {
@@ -532,12 +560,8 @@ async function directorPass(forceType = null) {
             await worldSave(renderWSMd(ws));
             const ev = String(plan.event_text || "").trim();
             if (ev) {
-                setExtensionPrompt(INJECT_KEY, `[SCENE EVENT — this happens in the scene RIGHT NOW. ${name2 || "The character"} MUST notice it and weave a concrete reaction into this reply. Do not ignore it, do not postpone it]: ${ev}`, 1, dcfg().depth);
-                eventPending = true; lastEventText = ev; lastEventType = plan.event_type || "none";
-                try { toastr.info(ev, "🎬 Событие — впишется в следующий ответ", { timeOut: 6000 }); } catch (e) {}
-                if (dcfg().eventMode === "message") postEventMessage(ev, lastEventType); // опционально: ещё и отдельным пузырём
+                chargeEvent(ev, plan.event_type);
             } else {
-                setExtensionPrompt(INJECT_KEY, "", 1, dcfg().depth); eventPending = false;
                 try { toastr.info("Спокойный ход, событий нет — мир обновлён", "🎬 Режиссёр", { timeOut: 3000 }); } catch (e) {}
             }
         } else {
@@ -574,11 +598,12 @@ const EVENT_THEME = {
     custom:    ["✦ СВОЁ", "150,150,160"],
 };
 
-const normEv = (v) => (v && typeof v === "object") ? { text: v.text || "", type: v.type || "none" } : { text: String(v || ""), type: "none" };
+const normEv = (v) => (v && typeof v === "object") ? { text: v.text || "", type: v.type || "none", announce: !!v.announce } : { text: String(v || ""), type: "none", announce: false };
 
-// собрать DOM плашки события (метка по типу + текст + кнопка перевода)
-function buildEventBadge(text, type) {
-    const [label, rgb] = EVENT_THEME[type] || EVENT_THEME.none;
+// собрать DOM плашки события (метка по типу + текст + кнопка перевода); announce → «скоро»
+function buildEventBadge(text, type, announce) {
+    const [label0, rgb] = EVENT_THEME[type] || EVENT_THEME.none;
+    const label = announce ? `🎬 скоро — ${label0}` : label0;
     const div = document.createElement("div");
     div.className = "mm-dir-event";
     div.style.cssText = `margin-top:6px;font-size:.85em;opacity:.92;padding:3px 8px;border-radius:8px;background:rgba(${rgb},.15);border:1px solid rgba(${rgb},.4);display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap;`;
@@ -627,16 +652,16 @@ function postEventMessage(text, type) {
 
 // повесить плашку под конкретное сообщение
 function attachBadge(mes, ev) {
-    const { text, type } = normEv(ev);
+    const { text, type, announce } = normEv(ev);
     if (!mes || !text) return;
     mes.querySelector(".mm-dir-event")?.remove();
-    (mes.querySelector(".mes_block") || mes).appendChild(buildEventBadge(text, type));
+    (mes.querySelector(".mes_block") || mes).appendChild(buildEventBadge(text, type, announce));
 }
 
 // плашка под последним сообщением + сохранить её в память чата (переживёт перезаход)
-function renderEventBadge(text, type) {
+function renderEventBadge(text, type, announce) {
     if (!text) return;
-    const ev = { text, type: type || "none" };
+    const ev = { text, type: type || "none", announce: !!announce };
     attachBadge([...document.querySelectorAll("#chat .mes")].pop(), ev);
     try {
         const idx = (ctxRef?.chat?.length || 0) - 1;
@@ -663,9 +688,10 @@ function restoreEventBadges() {
 // раз в N ответов персонажа: сначала снять «прожитое» событие, потом при необходимости запустить режиссёра
 function onCharMessage() {
     const c = dcfg();
-    console.debug("[Режиссёр] ответ получен | enabled:", c.enabled, "| interval:", c.interval, "| до прогона:", dirCounter);
-    if (eventPending) { try { setExtensionPrompt(INJECT_KEY, "", 1, c.depth); } catch (e) {} eventPending = false; renderEventBadge(lastEventText, lastEventType); }
-    if (lastWasSwipe) { lastWasSwipe = false; return; }
+    // свайп/перегенерация: событие НЕ снимаем (инъекция жива для нового варианта), только перерисуем плашку
+    if (lastWasSwipe) { lastWasSwipe = false; if (pendingEvent) renderEventBadge(pendingEvent.text, pendingEvent.type); return; }
+    // свежий ответ отыграл заряженное событие → плашка + пометка «использовано» (расход будет при следующем сообщении игрока)
+    if (pendingEvent && !eventUsed) { eventUsed = true; renderEventBadge(pendingEvent.text, pendingEvent.type); }
     if (!c.enabled || c.interval <= 0) return;
     let lastType = ""; try { lastType = substituteParams("{{lastGenerationType}}"); } catch (e) {}
     if (["continue", "quiet", "impersonate"].includes(lastType)) return;
@@ -696,6 +722,8 @@ export function initDirector(ctx) {
     if (ps) { ps.innerHTML = PRESET_KEYS.map((k) => `<option value="${k.replace(/"/g, "&quot;")}">${k}</option>`).join(""); ps.value = c.preset; }
     const em = document.getElementById("mmdir-eventmode");
     if (em) em.value = c.eventMode;
+    const hd = document.getElementById("mmdir-hard");
+    if (hd) hd.checked = c.hardDirective;
 
     // Делегированные обработчики (панель строится один раз).
     $(document).off("change.mmdir click.mmdir input.mmdir");
@@ -719,6 +747,7 @@ export function initDirector(ctx) {
     });
     $(document).on("click.mmdir", ".mmdir-force", function () { const t = this.getAttribute("data-ev"); if (t) runDirector(t); });
     $(document).on("change.mmdir", "#mmdir-eventmode", () => { dcfg().eventMode = String($("#mmdir-eventmode").val()); saveCfg(); });
+    $(document).on("change.mmdir", "#mmdir-hard", () => { dcfg().hardDirective = $("#mmdir-hard").prop("checked"); saveCfg(); });
     $(document).on("click.mmdir", "#mmdir-prompt-edit", editPrompt);
     $(document).on("click.mmdir", "#mmdir-world-load", refreshWorld);
     $(document).on("click.mmdir", "#mmdir-world-save", async () => {
@@ -733,9 +762,15 @@ export function initDirector(ctx) {
     const et = ctxRef?.eventTypes || event_types;
     es.on(et.MESSAGE_RECEIVED, onCharMessage);
     es.on(et.MESSAGE_SWIPED, () => { lastWasSwipe = true; });
+    es.on(et.MESSAGE_SENT, () => {
+        // анонс → заряжаем сейчас (сработает в ближайшем ответе персонажа)
+        if (announceEvent) { pendingEvent = announceEvent; eventUsed = false; setInjection(pendingEvent.text); announceEvent = null; return; }
+        // событие уже отыграно предыдущим ответом → снимаем перед новой генерацией (свайпы его сохраняли)
+        if (pendingEvent && eventUsed) clearInjection();
+    });
     es.on(et.CHAT_CHANGED, () => {
         dirCounter = dcfg().interval;
-        eventPending = false;
+        pendingEvent = null; announceEvent = null; eventUsed = false;
         try { setExtensionPrompt(INJECT_KEY, "", 1, dcfg().depth); } catch (e) {}
         setTimeout(restoreEventBadges, 600);
     });
