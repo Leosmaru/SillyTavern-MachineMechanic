@@ -271,8 +271,24 @@ function injectDiceStyles() {
     st.textContent = `
         #${DICE_BTN_ID} { opacity: .5; transition: opacity .15s, color .15s; }
         #${DICE_BTN_ID}.mm-dice-on { opacity: 1; color: var(--SmartThemeQuoteColor, #7096b8); }
+        #${DICE_BTN_ID}.mm-dice-pulse { animation: mm-dice-pulse .6s ease; }
+        @keyframes mm-dice-pulse {
+            0% { transform: scale(1); }
+            45% { transform: scale(1.5); color: var(--SmartThemeQuoteColor, #7096b8); filter: brightness(1.6); }
+            100% { transform: scale(1); }
+        }
     `;
     document.head.appendChild(st);
+}
+
+// короткий «пульс» значка 🎲 — подтверждение, что бросок сделан (числа не видно)
+function mmPulseDiceButton() {
+    const btn = document.getElementById(DICE_BTN_ID);
+    if (!btn) return;
+    btn.classList.remove("mm-dice-pulse");
+    void btn.offsetWidth; // рестарт анимации
+    btn.classList.add("mm-dice-pulse");
+    setTimeout(() => btn.classList.remove("mm-dice-pulse"), 700);
 }
 
 // прячем ТОЛЬКО авто-бросок ИИ (.mm-dice-above). Ручной бросок юзера
@@ -378,10 +394,22 @@ jQuery(() => {
     if (ctx?.eventSource && ctx?.eventTypes) {
         // Перед генерацией — бросок ИИ + инъекция в модель. Если бросок ИИ скрыт,
         // сразу убираем его блок (инъекция при этом остаётся).
+        // Свайп (альтернативный вариант ►) НЕ перекидывает кубик — используется тот
+        // же бросок, что и у сообщения (инъекция прошлого броска сохраняется).
+        // Новый бросок только при обычной генерации / перегенерации («с нуля»).
         ctx.eventSource.on(ctx.eventTypes.GENERATION_STARTED, (type, options, dryRun) => {
             try {
+                if (type === "swipe") return; // свайп — тот же бросок, не перекидываем
                 mmOnGenerationStart(type, options, dryRun);
                 if (mmHideAiRoll()) mmStripAiRoll();
+                // подтверждение, что бросок реально ушёл в модель (даже когда скрыт)
+                if (mmModuleSettings().mmDiceEnabled && !dryRun && type !== "quiet" && type !== "impersonate") {
+                    const inj = ctx.extensionPrompts?.MM_DICE_ROLL?.value || "";
+                    if (inj) {
+                        console.log("[Механик машин] 🎲 бросок ИИ ушёл в модель:", inj);
+                        mmPulseDiceButton();
+                    }
+                }
             } catch (e) { /* noop */ }
         });
         // После ответа — показать бросок ИИ над сообщением (если не скрыт), ровно один.
