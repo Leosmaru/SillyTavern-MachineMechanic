@@ -495,7 +495,7 @@ async function directorPass(forceType = null) {
             await worldSave(renderWSMd(ws));
             const ev = String(plan.event_text || "").trim();
             if (ev) {
-                setExtensionPrompt(INJECT_KEY, `[SCENE EVENT]: ${ev}`, 1, dcfg().depth);
+                setExtensionPrompt(INJECT_KEY, `[SCENE EVENT — this happens in the scene RIGHT NOW. ${name2 || "The character"} MUST notice it and weave a concrete reaction into this reply. Do not ignore it, do not postpone it]: ${ev}`, 1, dcfg().depth);
                 eventPending = true; lastEventText = ev; lastEventType = plan.event_type || "none";
                 try { toastr.info(ev, "🎬 Событие — впишется в следующий ответ", { timeOut: 6000 }); } catch (e) {}
             } else {
