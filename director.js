@@ -62,10 +62,26 @@ const DEFAULT_EVENT_DEFS = {
 // Версия дефолтного промпта/определений. Бампни — и при загрузке форс-сбросит к новым дефолтам.
 const PROMPT_VER = 2;
 
-// Дефолтный промпт режиссёра (на английском — как все промпты плагина; так модели надёжнее
-// держат формат). Таксономия событий + ритм — порт из Soul of Waifu (Soul Stage).
-const DEFAULT_PROMPT =
-`You are the hidden Director of a solo roleplay between {{user}} and the character {{char}}.
+// Ритм событий — меняется ПРЕСЕТОМ. Остальной промпт общий (buildPrompt).
+const PACING_BALANCED =
+`PACING (important):
+- Not every turn is an event. Aim for 1 event per 2-3 calm turns.
+- If recent turns were already eventful, return "none" and let the scene breathe. Do not stack encounter->twist->discovery.
+- But no dead silence either: if nothing has happened for a while, an event is warranted.
+- On "none": leave event_text EMPTY (or one short sensory touch), but still update the world.
+- On an event: event_text is a CONCRETE happening in the world (someone entered, a sound, a find, a threat), no character dialogue, 1-2 sentences.`;
+
+const PACING_SHARP =
+`PACING (lean toward events):
+- Make things happen OFTEN — aim for an event on most turns (~2 of every 3). Prefer a real event over "none".
+- Use "none" only when the scene genuinely needs a single beat to breathe.
+- Still vary the type — do not repeat the same event_type twice in a row.
+- On "none": still update the world (event_text empty or one short touch).
+- On an event: event_text is a CONCRETE happening (arrival, sound, find, threat, sudden turn), no character dialogue, 1-2 sentences.`;
+
+// Общее тело промпта (английское — как все промпты плагина). Ритм подставляется пресетом.
+function buildPrompt(pacing) {
+    return `You are the hidden Director of a solo roleplay between {{user}} and the character {{char}}.
 You do NOT write characters' lines. You decide WHAT happens in the world and how it changes.
 Take the active GOAL (if any) into account — events should gently steer toward it.
 Narration style for event_text: {{style}}.
@@ -82,12 +98,7 @@ RECENT MESSAGES:
 EVENT TYPES (pick one for event_type):
 {{events}}
 
-PACING (important):
-- Not every turn is an event. Aim for 1 event per 2-3 calm turns.
-- If recent turns were already eventful, return "none" and let the scene breathe. Do not stack encounter->twist->discovery.
-- But no dead silence either: if nothing has happened for a while, an event is warranted.
-- On "none": leave event_text EMPTY (or one short sensory touch), but still update the world.
-- On an event: event_text is a CONCRETE happening in the world (someone entered, a sound, a find, a threat), no character dialogue, 1-2 sentences.
+${pacing}
 
 Return ONLY one JSON object, no explanations and no code fences:
 {
@@ -97,6 +108,15 @@ Return ONLY one JSON object, no explanations and no code fences:
   "npc": null
 }
 An NPC ("visitor") is voiced by the character itself — you only introduce them via event_text and "npc": {"name","archetype","personality"}.`;
+}
+
+// Пресеты режиссёра: разный ритм событий. Выбор пресета перезаписывает промпт.
+const PRESETS = {
+    "Сбалансированный (по умолчанию)": buildPrompt(PACING_BALANCED),
+    "Порезче (больше событий)":        buildPrompt(PACING_SHARP),
+};
+const PRESET_KEYS = Object.keys(PRESETS);
+const DEFAULT_PROMPT = PRESETS[PRESET_KEYS[0]];
 
 // ---------------------------------------------------------------------------
 // Настройки (как cfg() у 🧠, но своя ветка mm_director)
@@ -110,8 +130,9 @@ function dcfg() {
     if (typeof c.depth !== "number") c.depth = 1;                               // глубина инъекции события
     if (typeof c.maxTokens !== "number") c.maxTokens = 1000;                    // свой лимит токенов на ответ режиссёра (мало → обрыв JSON)
     // при апгрейде версии промпта — один раз форс-сброс промпта и определений к новым (английским) дефолтам
-    if (c.promptVer !== PROMPT_VER) { c.prompt = DEFAULT_PROMPT; c.eventDefs = { ...DEFAULT_EVENT_DEFS }; c.promptVer = PROMPT_VER; }
+    if (c.promptVer !== PROMPT_VER) { c.prompt = DEFAULT_PROMPT; c.eventDefs = { ...DEFAULT_EVENT_DEFS }; c.preset = PRESET_KEYS[0]; c.promptVer = PROMPT_VER; }
     if (typeof c.prompt !== "string" || !c.prompt) c.prompt = DEFAULT_PROMPT;
+    if (typeof c.preset !== "string" || !PRESETS[c.preset]) c.preset = PRESET_KEYS[0]; // текущий пресет ритма
     if (typeof c.eventDefs !== "object" || !c.eventDefs) c.eventDefs = {};      // определения типов событий
     for (const k of EVENT_KEYS) if (typeof c.eventDefs[k] !== "string") c.eventDefs[k] = DEFAULT_EVENT_DEFS[k];
     return c;
@@ -193,6 +214,9 @@ function pageHtml() {
     const styleOptions = NARRATOR_STYLES
         .map((s) => `<option value="${s.replace(/"/g, "&quot;")}">${s}</option>`)
         .join("");
+    const forceButtons = EVENT_KEYS.filter((k) => k !== "none")
+        .map((k) => { const [lbl] = EVENT_THEME[k] || EVENT_THEME.none; return `<input type="button" class="menu_button mmdir-force" data-ev="${k}" value="${lbl}" />`; })
+        .join("");
     return `
     <details class="mmobj-help">
         <summary>Как пользоваться</summary>
@@ -207,7 +231,7 @@ function pageHtml() {
                 <li><b>Промпт режиссёра</b> — что именно спрашивать у ИИ (строгий JSON).</li>
                 <li><b>Мир (World.md)</b> — текущее состояние мира; хранится в файле этого чата и удаляется вместе с ним.</li>
             </ul>
-            <small>⚠️ Сейчас готов каркас (страница + настройки + World.md). Сам запуск режиссёра — следующий шаг.</small>
+            <small>🎬 Тумблер в шапке — вкл. «Стригерить событие» — разово гарантированно выдать выбранный тип. Пресет меняет ритм.</small>
         </div>
     </details>
 
@@ -228,8 +252,19 @@ function pageHtml() {
         <select id="mmdir-style" class="text_pole">${styleOptions}</select>
     </div>
 
+    <div class="objective_block objective_block_control flex1 flexFlowColumn" style="margin-top:8px;">
+        <label for="mmdir-preset">Пресет режиссёра</label>
+        <select id="mmdir-preset" class="text_pole"></select>
+        <small>Меняет ритм событий. Выбор перезапишет промпт режиссёра.</small>
+    </div>
+
     <div class="objective_block flex-container" style="margin-top:8px;">
         <input id="mmdir-prompt-edit" class="menu_button" type="submit" value="Промпт режиссёра" />
+    </div>
+
+    <div class="objective_block flex-container" style="margin-top:8px; flex-wrap:wrap; gap:4px;">
+        <small style="width:100%; opacity:.75;">Стригерить событие сейчас (разово, гарантированно, на текущем пресете):</small>
+        ${forceButtons}
     </div>
 
     <hr class="m-t-1 m-b-1">
@@ -434,24 +469,25 @@ function parsePlan(raw) {
 // ---------------------------------------------------------------------------
 // Сам цикл режиссёра: смотрит сцену → обновляет мир + вбрасывает событие
 // ---------------------------------------------------------------------------
-async function runDirector() {
+async function runDirector(forceType = null) {
     if (dirBusy) return;
     const chat = chatId();
     if (!chat || typeof generateRaw !== "function") return;
     dirBusy = true;
     if (mmBusy()) progShow("Режиссёр в очереди…"); // ждём, если дневник/другой прогон уже идёт
     try {
-        await mmEnqueue(() => directorPass());     // очередь пропускает сразу, если никто не занят
+        await mmEnqueue(() => directorPass(forceType)); // очередь пропускает сразу, если никто не занят
     } finally {
         dirBusy = false;
     }
 }
 
-async function directorPass() {
+async function directorPass(forceType = null) {
     try {
-        progShow("Режиссёр смотрит на сцену…");
+        progShow(forceType ? `Режиссёр: событие «${forceType}»…` : "Режиссёр смотрит на сцену…");
         const ws = parseWS(await worldLoad());
-        const prompt = renderPrompt(dcfg().prompt, ws);
+        let prompt = renderPrompt(dcfg().prompt, ws);
+        if (forceType) prompt += `\n\nMANDATORY THIS TURN: event_type MUST be "${forceType}". Produce a strong, concrete event_text for it (fill "npc" if visitor). Do NOT return "none".`;
         const raw = await generateRaw({ prompt, systemPrompt: dirSys(), responseLength: dcfg().maxTokens });
         const plan = parsePlan(raw);
         if (plan) {
@@ -510,18 +546,13 @@ function buildEventBadge(text, type) {
     span.textContent = `${label}: ${text}`;
     const tr = document.createElement("span");
     tr.className = "fa-solid fa-language interactable";
-    tr.title = "Перевести";
+    tr.title = "Перевести / вернуть оригинал";
     tr.style.cssText = "cursor:pointer;opacity:.8;";
+    let ruCache = null, showingRu = false;
     tr.addEventListener("click", async () => {
-        tr.style.opacity = ".4";
-        const t = await translateRu(text);
-        if (t) {
-            const p = document.createElement("div");
-            p.style.cssText = "opacity:.85;margin-top:2px;flex-basis:100%;";
-            p.textContent = "→ " + t;
-            div.appendChild(p);
-            tr.remove();
-        } else { tr.style.opacity = ".8"; }
+        if (showingRu) { span.textContent = `${label}: ${text}`; showingRu = false; return; } // тумблер: назад к оригиналу
+        if (ruCache === null) { tr.style.opacity = ".4"; ruCache = await translateRu(text); tr.style.opacity = ".8"; }
+        if (ruCache) { span.textContent = `${label}: ${ruCache}`; showingRu = true; }        // замена на месте, не дописываем
     });
     div.appendChild(span); div.appendChild(tr);
     return div;
@@ -594,6 +625,8 @@ export function initDirector(ctx) {
     if (stl) stl.value = c.style;
     const mt = document.getElementById("mmdir-maxtokens");
     if (mt) mt.value = c.maxTokens;
+    const ps = document.getElementById("mmdir-preset");
+    if (ps) { ps.innerHTML = PRESET_KEYS.map((k) => `<option value="${k.replace(/"/g, "&quot;")}">${k}</option>`).join(""); ps.value = c.preset; }
 
     // Делегированные обработчики (панель строится один раз).
     $(document).off("change.mmdir click.mmdir input.mmdir");
@@ -608,6 +641,14 @@ export function initDirector(ctx) {
         await refreshWorld();
     });
     $(document).on("change.mmdir", "#mmdir-style", () => { dcfg().style = String($("#mmdir-style").val()); saveCfg(); });
+    $(document).on("change.mmdir", "#mmdir-preset", () => {
+        const key = String($("#mmdir-preset").val());
+        if (!PRESETS[key]) return;
+        const cc = dcfg(); cc.preset = key; cc.prompt = PRESETS[key]; saveCfg();
+        const ta = document.getElementById("mmdir-prompt-text"); if (ta) ta.value = PRESETS[key]; // если редактор открыт
+        try { toastr.info("Пресет: " + key, "🎬 Режиссёр"); } catch (e) {}
+    });
+    $(document).on("click.mmdir", ".mmdir-force", function () { const t = this.getAttribute("data-ev"); if (t) runDirector(t); });
     $(document).on("click.mmdir", "#mmdir-prompt-edit", editPrompt);
     $(document).on("click.mmdir", "#mmdir-world-load", refreshWorld);
     $(document).on("click.mmdir", "#mmdir-world-save", async () => {
