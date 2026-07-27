@@ -241,19 +241,27 @@ function watchTranslateButtons() {
 }
 
 // ----------------------------------------------------------------------------
-// Кубик 🎲: значок у «Отправить» (вкл/выкл) + СКРЫТЫЙ бросок.
-// Бросок делается заранее перед генерацией и уходит модели инъекцией; юзеру
-// не показывается вообще. «Перегенерить» → новый бросок (флаг остаётся включён).
+// Кубик 🎲: значок у «Отправить» (вкл/выкл) + управление показом броска.
+//
+// Два РАЗНЫХ броска:
+//   • Бросок ИИ — авто перед ответом (.mm-dice-above над сообщением) + инъекция
+//     в модель. Показ регулируется опцией «Не показывать бросок ИИ».
+//   • Бросок пользователя — кнопка «🎲 Бросить сейчас» (.mm-dice под сообщением).
+//     Это личный бросок юзера — виден ВСЕГДА, опция его не трогает.
 // ----------------------------------------------------------------------------
-// false = бросок не показывается юзеру (только инъекция в модель — как ты просил);
-// true  = вернуть прежнее поведение (число над сообщением). Меняется тут.
-const MM_DICE_SHOW_ROLL = false;
 const DICE_BTN_ID = "mm-dice-button";
 
 // тот же путь настроек, что читает бандл: extension_settings.STMemoryBooks.moduleSettings
 function mmModuleSettings() {
     const root = extension_settings.STMemoryBooks || (extension_settings.STMemoryBooks = {});
     return root.moduleSettings || (root.moduleSettings = {});
+}
+
+// прятать ли АВТО-бросок ИИ (по умолчанию да — как просил пользователь)
+function mmHideAiRoll() {
+    const ms = mmModuleSettings();
+    if (typeof ms.mmDiceHideAiRoll !== "boolean") ms.mmDiceHideAiRoll = true;
+    return ms.mmDiceHideAiRoll;
 }
 
 function injectDiceStyles() {
@@ -263,21 +271,33 @@ function injectDiceStyles() {
     st.textContent = `
         #${DICE_BTN_ID} { opacity: .5; transition: opacity .15s, color .15s; }
         #${DICE_BTN_ID}.mm-dice-on { opacity: 1; color: var(--SmartThemeQuoteColor, #7096b8); }
-        ${MM_DICE_SHOW_ROLL ? "" : ".mm-dice, .mm-dice-above { display: none !important; }"}
     `;
     document.head.appendChild(st);
+}
+
+// прячем ТОЛЬКО авто-бросок ИИ (.mm-dice-above). Ручной бросок юзера
+// (.mm-dice без -above) не трогаем — он виден всегда.
+function applyDiceRollCss() {
+    let st = document.getElementById("mm-dice-hide-style");
+    if (!st) {
+        st = document.createElement("style");
+        st.id = "mm-dice-hide-style";
+        document.head.appendChild(st);
+    }
+    st.textContent = mmHideAiRoll() ? ".mm-dice-above { display: none !important; }" : "";
 }
 
 function updateDiceButton(btn) {
     const on = !!mmModuleSettings().mmDiceEnabled;
     btn.classList.toggle("mm-dice-on", on);
     btn.title = on
-        ? "🎲 Кубик ВКЛ — следующая генерация со скрытым броском. Клик — выключить."
-        : "🎲 Кубик выкл. Клик — включить (скрытый бросок на каждую генерацию).";
+        ? "🎲 Кубик ВКЛ — бросок ИИ на каждую генерацию. Клик — выключить."
+        : "🎲 Кубик выкл. Клик — включить (бросок ИИ на каждую генерацию).";
 }
 
 function createDiceButton() {
     injectDiceStyles();
+    applyDiceRollCss();
     if (document.getElementById(DICE_BTN_ID)) return;
     const btn = document.createElement("div");
     btn.id = DICE_BTN_ID;
@@ -307,10 +327,42 @@ function createDiceButton() {
     updateDiceButton(btn);
 }
 
-// убрать любые визуальные блоки броска из чата (скрытый режим)
-function mmStripDiceBlocks() {
+// убрать ТОЛЬКО авто-броски ИИ (.mm-dice-above); ручной бросок юзера не трогаем
+function mmStripAiRoll() {
     const chat = document.getElementById("chat");
-    if (chat) chat.querySelectorAll(".mm-dice-above, .mm-dice").forEach((n) => n.remove());
+    if (chat) chat.querySelectorAll(".mm-dice-above").forEach((n) => n.remove());
+}
+
+// оставить максимум ОДИН авто-бросок — тот, что прямо над текущим сообщением
+function mmDedupeAiRoll(mesId) {
+    const chat = document.getElementById("chat");
+    if (!chat) return;
+    const mes = chat.querySelector(`.mes[mesid="${mesId}"]`);
+    chat.querySelectorAll(".mm-dice-above").forEach((n) => {
+        if (!(mes && n === mes.previousElementSibling)) n.remove();
+    });
+}
+
+// Галку «Не показывать бросок ИИ» дорисовываем в РОДНОЕ окно настроек кубика
+// (оно в бандле) — ловим его появление и вставляем чекбокс рядом с «Включить».
+function injectHideAiCheckbox(root) {
+    if (!root || !root.querySelector) return;
+    const en = root.querySelector("#mm-dice-enabled");
+    if (!en || root.querySelector("#mm-dice-hide-ai")) return;
+    const anchor = en.closest("label") || en.parentElement;
+    if (!anchor) return;
+    const lbl = document.createElement("label");
+    lbl.style.cssText = "display:flex; gap:8px; align-items:center; margin:8px 0;";
+    lbl.innerHTML = '<input type="checkbox" id="mm-dice-hide-ai"> Не показывать бросок ИИ (только скрытая инъекция в модель)';
+    const chk = lbl.querySelector("input");
+    chk.checked = mmHideAiRoll();
+    chk.addEventListener("change", () => {
+        mmModuleSettings().mmDiceHideAiRoll = chk.checked;
+        try { saveSettingsDebounced(); } catch (e) { /* noop */ }
+        applyDiceRollCss();
+        if (chk.checked) mmStripAiRoll();
+    });
+    anchor.after(lbl);
 }
 
 jQuery(() => {
@@ -324,20 +376,20 @@ jQuery(() => {
     const ctx = (typeof SillyTavern !== "undefined" && SillyTavern.getContext)
         ? SillyTavern.getContext() : null;
     if (ctx?.eventSource && ctx?.eventTypes) {
-        // Перед генерацией — кинуть кубик и отдать результат в промпт (инъекция).
-        // В скрытом режиме сразу убираем превью-блок, чтобы юзер броска не видел.
+        // Перед генерацией — бросок ИИ + инъекция в модель. Если бросок ИИ скрыт,
+        // сразу убираем его блок (инъекция при этом остаётся).
         ctx.eventSource.on(ctx.eventTypes.GENERATION_STARTED, (type, options, dryRun) => {
             try {
                 mmOnGenerationStart(type, options, dryRun);
-                if (!MM_DICE_SHOW_ROLL) mmStripDiceBlocks();
+                if (mmHideAiRoll()) mmStripAiRoll();
             } catch (e) { /* noop */ }
         });
-        // После ответа — показать число только если включён видимый режим.
+        // После ответа — показать бросок ИИ над сообщением (если не скрыт), ровно один.
         const rendered = ctx.eventTypes.CHARACTER_MESSAGE_RENDERED || ctx.eventTypes.MESSAGE_RECEIVED;
         ctx.eventSource.on(rendered, (id) => {
             try {
-                if (MM_DICE_SHOW_ROLL) mmShowRollOnMessage(id);
-                else mmStripDiceBlocks();
+                if (mmHideAiRoll()) { mmStripAiRoll(); }
+                else { mmShowRollOnMessage(id); mmDedupeAiRoll(id); }
             } catch (e) { /* noop */ }
         });
         // Значок у «Отправить» пересоздаём при смене чата; синхроним с чекбоксом панели.
@@ -348,6 +400,18 @@ jQuery(() => {
             const b = document.getElementById(DICE_BTN_ID);
             if (b) updateDiceButton(b);
         });
+        // Ловим открытие родного окна настроек кубика → вставляем галку «Не показывать бросок ИИ».
+        try {
+            new MutationObserver((muts) => {
+                for (const m of muts) {
+                    for (const n of m.addedNodes) {
+                        if (!n || n.nodeType !== 1) continue;
+                        if (n.id === "mm-dice-enabled") injectHideAiCheckbox(n.parentElement);
+                        else if (n.querySelector && n.querySelector("#mm-dice-enabled")) injectHideAiCheckbox(n);
+                    }
+                }
+            }).observe(document.body, { childList: true, subtree: true });
+        } catch (e) { /* noop */ }
     }
 
     // Бейджи «к какой записи лорбука относится сообщение» + понятная индикация стрелок.
