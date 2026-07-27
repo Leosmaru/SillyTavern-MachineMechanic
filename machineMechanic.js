@@ -372,6 +372,31 @@ function mmDedupeAiRoll(mesId) {
     });
 }
 
+// Тег «🎲 …» ВНУТРИ сообщения ИИ, которое учло бросок (успех/провал/число «за твоё действие»).
+// Данные берём из активной инъекции MM_DICE_ROLL (там уже посчитан исход).
+function mmDiceBadge(id) {
+    try {
+        const ctx = (typeof SillyTavern !== "undefined" && SillyTavern.getContext) ? SillyTavern.getContext() : null;
+        const inj = ctx?.extensionPrompts?.MM_DICE_ROLL?.value || "";
+        if (!inj) return; // бросок не использовался в этом ответе
+        let label = "", ok = null;
+        const mNum = inj.match(/d20 = (\d+)\/20/);
+        if (mNum) { const n = Number(mNum[1]); ok = n >= 11; label = `🎲 ${n}`; }
+        else if (/RESULT = SUCCESS/.test(inj)) { ok = true; label = "🎲 Успех"; }
+        else if (/RESULT = FAILURE/.test(inj)) { ok = false; label = "🎲 Провал"; }
+        else return;
+        const mes = document.querySelector(`#chat .mes[mesid="${id}"]`) || [...document.querySelectorAll("#chat .mes")].pop();
+        if (!mes) return;
+        mes.querySelector(".mm-dice-badge")?.remove();
+        const rgb = ok ? "80,180,120" : "210,70,70";
+        const div = document.createElement("div");
+        div.className = "mm-dice-badge";
+        div.style.cssText = `margin-top:6px;font-size:.85em;opacity:.92;padding:2px 8px;border-radius:8px;display:inline-block;background:rgba(${rgb},.15);border:1px solid rgba(${rgb},.45);`;
+        div.textContent = `${label} · за твоё действие`;
+        (mes.querySelector(".mes_block") || mes).appendChild(div);
+    } catch (e) { /* noop */ }
+}
+
 // Галку «Не показывать бросок ИИ» дорисовываем в РОДНОЕ окно настроек кубика
 // (оно в бандле) — ловим его появление и вставляем чекбокс рядом с «Включить».
 function injectHideAiCheckbox(root) {
@@ -432,6 +457,7 @@ jQuery(() => {
             try {
                 if (mmHideAiRoll()) { mmStripAiRoll(); }
                 else { mmShowRollOnMessage(id); mmDedupeAiRoll(id); }
+                mmDiceBadge(id); // тег на сообщении: успех/провал/число «за твоё действие»
             } catch (e) { /* noop */ }
         });
         // Значок у «Отправить» пересоздаём при смене чата; синхроним с чекбоксом панели.
