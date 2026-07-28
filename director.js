@@ -17,7 +17,7 @@
 // Мир: POST /api/plugins/soul-md/{save,docs} — серверный код не меняем.
 // ============================================================================
 
-import { getRequestHeaders, getCurrentChatId, setExtensionPrompt, saveSettingsDebounced, generateRaw, chat_metadata, substituteParams, eventSource, event_types, name1, name2 } from "../../../../script.js";
+import { getRequestHeaders, getCurrentChatId, setExtensionPrompt, saveSettingsDebounced, generateRaw, chat_metadata, substituteParams, eventSource, event_types, name1, name2, saveMetadata } from "../../../../script.js";
 import { extension_settings, saveMetadataDebounced } from "../../../extensions.js";
 import { callGenericPopup, POPUP_TYPE } from "../../../popup.js";
 import { mmEnqueue, mmBusy } from "./mmQueue.js";
@@ -286,8 +286,8 @@ async function ensureLorebook() {
         const tpl = extension_settings.STMemoryBooks?.moduleSettings?.lorebookNameTemplate || "LTM - {{char}} - {{chat}}";
         const r = await autoCreateLorebook(tpl, "npc"); // сам привязывает через chat_metadata[METADATA_KEY] + saveMetadata
         if (r?.success && r.name) {
-            // ST при авто-создании не подсвечивает кнопку «Chat Lorebook» — подтвердим привязку и UI
-            try { chat_metadata[METADATA_KEY] = r.name; $(".chat_lorebook_button").addClass("world_set"); } catch (e) {}
+            // подтвердим привязку (страховка на новый чат) + сохраним + подсветим кнопку «Chat Lorebook»
+            try { chat_metadata[METADATA_KEY] = r.name; await saveMetadata(); $(".chat_lorebook_button").addClass("world_set"); } catch (e) {}
             return r.name;
         }
         return null;
