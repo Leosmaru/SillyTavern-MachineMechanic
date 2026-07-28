@@ -527,7 +527,49 @@ async function showNpcCreatePopup(np, descOverride) {
     const tier = mode || (seed ? "base" : null); // режим не выбран + промт → слабая; иначе как есть
     if (tier) {
         try { toastr.info("Прокачиваю: " + nm, "🎬 NPC", { timeOut: 2500 }); } catch (e) {}
-        npcFleshOut(nm, { tier, seed, queued: true });
+        await npcFleshOut(nm, { tier, seed, queued: true }); // await — карточка готова
+        await showNpcReview(nm, tier, seed);                  // окно проверки: утвердить / перегенерить / отмена(удалить)
+    }
+}
+// Окно проверки после генерации: сверху промт (редактируемый), ниже карточка (🌐 Яндекс-перевод),
+// кнопки Утвердить / 🔄 Перегенерировать / Отмена. Отмена — удаляет персонажа И снимает событие-приход.
+async function showNpcReview(name, tier, usedPrompt) {
+    usedPrompt = String(usedPrompt || "");
+    while (true) {
+        const cur = (await npcList()).find((n) => n.name === name);
+        const card = cur?.content || "(пусто)";
+        const html = `
+        <div class="objective_prompt_modal">
+            <h4 style="margin:.2em 0 .4em;">🎬 Персонаж готов — проверь</h4>
+            <label>Промт генерации (можно поменять и перегенерировать; пусто = по контексту)</label>
+            <textarea id="mmdir-rev-prompt" class="text_pole textarea_compact" rows="3"></textarea>
+            <hr class="m-t-1 m-b-1">
+            <label>${String(name).replace(/</g, "&lt;")} <span id="mmdir-rev-tr" class="fa-solid fa-language interactable" title="Перевод (Яндекс) / оригинал" style="cursor:pointer;opacity:.8;margin-left:4px;"></span></label>
+            <div id="mmdir-rev-card" style="white-space:pre-wrap;opacity:.9;max-height:42vh;overflow:auto;margin-top:4px;"></div>
+        </div>`;
+        const picked = { prompt: usedPrompt };
+        const p = callGenericPopup(html, POPUP_TYPE.TEXT, "", {
+            wide: true, okButton: "Утвердить", cancelButton: "Отмена (удалить)",
+            customButtons: [{ text: "🔄 Перегенерировать", result: 10 }],
+            onClosing: () => { try { picked.prompt = String($("#mmdir-rev-prompt").val() || "").trim(); } catch (e) {} return true; },
+        });
+        $("#mmdir-rev-prompt").val(usedPrompt);
+        const cardEl = document.getElementById("mmdir-rev-card");
+        if (cardEl) cardEl.textContent = card;
+        let ruCache = null, showRu = false;
+        $("#mmdir-rev-tr").on("click", async () => {
+            if (showRu) { if (cardEl) cardEl.textContent = card; showRu = false; return; }
+            if (ruCache === null) ruCache = await translateRu(card);
+            if (ruCache && cardEl) { cardEl.textContent = ruCache; showRu = true; }
+        });
+        const res = await p;
+        if (res === 10) { usedPrompt = picked.prompt; await npcFleshOut(name, { tier, seed: usedPrompt, queued: true }); continue; } // перегенерировать
+        if (!res) { // отмена → удалить персонажа + снять событие-приход
+            await npcDelete(name); try { clearInjection(); } catch (e) {} renderNpcList();
+            try { toastr.info("Отменено — персонаж и событие убраны: " + name, "🎭 NPC"); } catch (e) {}
+            return;
+        }
+        return; // утвердить
     }
 }
 
