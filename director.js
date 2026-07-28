@@ -398,9 +398,9 @@ async function npcFleshOut(name, { tier = "medium", seed = "", queued = false } 
     return true;
 }
 
-// Окно при создании NPC: имя + как набросал режиссёр (транслит) + поле промта.
-// Три кнопки внизу СРАЗУ применяют и закрывают: «Оставить как есть» / «Прокачать» / «Прокачать сильнее».
-// «Оставить как есть» + промт → слабая по промту; без промта → набросок как есть. Промт задаёт персонажа заново.
+// Окно при создании NPC: имя + набросок режиссёра (транслит) + промт.
+// Режимы «Прокачать»/«Прокачать сильнее» подсвечиваются при выборе, «Применить» — снизу, применяет.
+// Применить: режим «сильнее»→мега, «Прокачать»→средняя, режим не выбран + промт→слабая, ничего→как есть.
 async function showNpcCreatePopup(np) {
     const name0 = String(np?.name || "").trim();
     if (!name0) return;
@@ -414,28 +414,39 @@ async function showNpcCreatePopup(np) {
         <div id="mmdir-npcpop-desc" style="opacity:.85;white-space:pre-wrap;margin:2px 0 8px;"></div>
         <label>Промт (задаёт персонажа заново; пусто = по наброску)</label>
         <textarea id="mmdir-npcpop-seed" class="text_pole textarea_compact" rows="3" placeholder="Каким должен быть персонаж — или оставь пустым"></textarea>
-        <small style="opacity:.7;">Кнопка внизу сразу применит и закроет окно.</small>
+        <label style="margin-top:8px;">Режим прокачки (не выбран = как есть):</label>
+        <div class="flex-container" style="gap:8px;margin-top:4px;">
+            <input id="mmdir-npcpop-med" class="menu_button" type="button" value="Прокачать" />
+            <input id="mmdir-npcpop-mega" class="menu_button" type="button" value="Прокачать сильнее" />
+        </div>
     </div>`;
-    let seed = "", newName = name0, ruCache = null, showRu = false;
-    const p = callGenericPopup(html, POPUP_TYPE.TEXT, "", {
-        wide: true, okButton: "Оставить как есть",
-        customButtons: [{ text: "Прокачать", result: 10 }, { text: "Прокачать сильнее", result: 11 }],
-    });
+    let seed = "", newName = name0, mode = null, ruCache = null, showRu = false;
+    const p = callGenericPopup(html, POPUP_TYPE.TEXT, "", { wide: true, okButton: "Применить" });
     $("#mmdir-npcpop-name").val(name0).on("input", () => { newName = String($("#mmdir-npcpop-name").val() || "").trim() || name0; });
     const descEl = document.getElementById("mmdir-npcpop-desc");
     if (descEl) descEl.textContent = desc;
     $("#mmdir-npcpop-seed").on("input", () => { seed = String($("#mmdir-npcpop-seed").val() || "").trim(); });
+    const paint = () => {
+        for (const [id, m] of [["mmdir-npcpop-med", "medium"], ["mmdir-npcpop-mega", "mega"]]) {
+            const el = document.getElementById(id); if (!el) continue;
+            const on = mode === m;
+            el.style.background = on ? "var(--SmartThemeQuoteColor, #4a90d9)" : "";
+            el.style.color = on ? "#fff" : "";
+            el.style.fontWeight = on ? "bold" : "";
+        }
+    };
+    $("#mmdir-npcpop-med").on("click", () => { mode = mode === "medium" ? null : "medium"; paint(); });
+    $("#mmdir-npcpop-mega").on("click", () => { mode = mode === "mega" ? null : "mega"; paint(); });
     $("#mmdir-npcpop-tr").on("click", async () => {
         if (showRu) { if (descEl) descEl.textContent = desc; showRu = false; return; }
         if (ruCache === null) ruCache = await translateRu(desc);
         if (ruCache && descEl) { descEl.textContent = ruCache; showRu = true; }
     });
     const res = await p;
-    if (!res) return; // крест → набросок как есть
+    if (!res) return; // крест → как есть
     const nm = String(newName || name0).trim() || name0;
     if (nm !== name0) await npcSaveCard(name0, nm, desc);
-    // 11 → мега, 10 → средняя, «Оставить как есть»(1): промт → слабая, иначе ничего
-    const tier = res === 11 ? "mega" : res === 10 ? "medium" : (seed ? "base" : null);
+    const tier = mode || (seed ? "base" : null); // режим не выбран + промт → слабая; иначе как есть
     if (tier) npcFleshOut(nm, { tier, seed, queued: true });
 }
 
