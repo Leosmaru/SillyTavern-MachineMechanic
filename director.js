@@ -535,24 +535,28 @@ async function showNpcCreatePopup(np, descOverride) {
 // кнопки Утвердить / 🔄 Перегенерировать / Отмена. Отмена — удаляет персонажа И снимает событие-приход.
 async function showNpcReview(name, tier, usedPrompt) {
     usedPrompt = String(usedPrompt || "");
+    let curName = name;
     while (true) {
-        const cur = (await npcList()).find((n) => n.name === name);
+        const cur = (await npcList()).find((n) => n.name === curName);
         const card = cur?.content || "(пусто)";
         const html = `
         <div class="objective_prompt_modal">
             <h4 style="margin:.2em 0 .4em;">🎬 Персонаж готов — проверь</h4>
-            <label>Промт генерации (можно поменять и перегенерировать; пусто = по контексту)</label>
+            <label>Имя (можно поменять)</label>
+            <input id="mmdir-rev-name" class="text_pole" type="text" />
+            <label style="margin-top:6px;">Промт генерации (можно поменять и перегенерировать; пусто = по контексту)</label>
             <textarea id="mmdir-rev-prompt" class="text_pole textarea_compact" rows="3"></textarea>
             <hr class="m-t-1 m-b-1">
-            <label>${String(name).replace(/</g, "&lt;")} <span id="mmdir-rev-tr" class="fa-solid fa-language interactable" title="Перевод (Яндекс) / оригинал" style="cursor:pointer;opacity:.8;margin-left:4px;"></span></label>
-            <div id="mmdir-rev-card" style="white-space:pre-wrap;opacity:.9;max-height:42vh;overflow:auto;margin-top:4px;"></div>
+            <label>Карточка <span id="mmdir-rev-tr" class="fa-solid fa-language interactable" title="Перевод (Яндекс) / оригинал" style="cursor:pointer;opacity:.8;margin-left:4px;"></span></label>
+            <div id="mmdir-rev-card" style="white-space:pre-wrap;opacity:.9;max-height:40vh;overflow:auto;margin-top:4px;"></div>
         </div>`;
-        const picked = { prompt: usedPrompt };
+        const picked = { prompt: usedPrompt, name: curName };
         const p = callGenericPopup(html, POPUP_TYPE.TEXT, "", {
             wide: true, okButton: "Утвердить", cancelButton: "Отмена (удалить)",
             customButtons: [{ text: "🔄 Перегенерировать", result: 10 }],
-            onClosing: () => { try { picked.prompt = String($("#mmdir-rev-prompt").val() || "").trim(); } catch (e) {} return true; },
+            onClosing: () => { try { picked.prompt = String($("#mmdir-rev-prompt").val() || "").trim(); picked.name = String($("#mmdir-rev-name").val() || "").trim() || curName; } catch (e) {} return true; },
         });
+        $("#mmdir-rev-name").val(curName);
         $("#mmdir-rev-prompt").val(usedPrompt);
         const cardEl = document.getElementById("mmdir-rev-card");
         if (cardEl) cardEl.textContent = card;
@@ -563,13 +567,14 @@ async function showNpcReview(name, tier, usedPrompt) {
             if (ruCache && cardEl) { cardEl.textContent = ruCache; showRu = true; }
         });
         const res = await p;
-        if (res === 10) { usedPrompt = picked.prompt; await npcFleshOut(name, { tier, seed: usedPrompt, queued: true }); continue; } // перегенерировать
-        if (!res) { // отмена → удалить персонажа + снять событие-приход
-            await npcDelete(name); try { clearInjection(); } catch (e) {} renderNpcList();
-            try { toastr.info("Отменено — персонаж и событие убраны: " + name, "🎭 NPC"); } catch (e) {}
+        if (!res) { // отмена → удалить персонажа (по текущему имени) + снять событие-приход
+            await npcDelete(curName); try { clearInjection(); } catch (e) {} renderNpcList();
+            try { toastr.info("Отменено — персонаж и событие убраны: " + curName, "🎭 NPC"); } catch (e) {}
             return;
         }
-        return; // утвердить
+        if (picked.name && picked.name !== curName) { await npcSaveCard(curName, picked.name, card); curName = picked.name; } // переименование
+        if (res === 10) { usedPrompt = picked.prompt; await npcFleshOut(curName, { tier, seed: usedPrompt, queued: true }); renderNpcList(); continue; } // перегенерировать
+        renderNpcList(); return; // утвердить
     }
 }
 
@@ -1095,7 +1100,7 @@ async function directorPass(forceType = null, suppressEvent = false) {
             prompt += `\n\nNPCs ALREADY ON SCENE: ${active.length ? active.join(", ") : "(none)"}.\n`
                 + `Do NOT re-introduce anyone already on scene: never emit a "visitor" event and never fill "npc" for a name in that list — they are ALREADY here, their arrival already happened. Use "visitor"/"npc" ONLY for a genuinely new person not in the list.\n`
                 + `Also add a field "npc_remove": [] — the exact names of any on-scene NPC who CLEARLY left THIS turn (said goodbye, walked away, was sent off, died); otherwise []. Never remove someone just to tidy up; a silent NPC stays.\n`
-                + `Write the "npc" fields (name, archetype, personality) in ENGLISH, even if the story is in another language.`;
+                + `The "npc" fields MUST be in ENGLISH (even if the story is in another language). "name" MUST be a concrete personal name you invent, fitting the setting — NEVER "noname", "unnamed", "unknown", "visitor", "stranger" or "the newcomer". Always fill "archetype" and "personality".`;
         }
         const raw = await generateRaw({ prompt, systemPrompt: dirSys(), responseLength: dcfg().maxTokens });
         const plan = parsePlan(raw);
