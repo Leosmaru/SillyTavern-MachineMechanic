@@ -284,8 +284,13 @@ async function ensureLorebook() {
     if (n) return n;
     try {
         const tpl = extension_settings.STMemoryBooks?.moduleSettings?.lorebookNameTemplate || "LTM - {{char}} - {{chat}}";
-        const r = await autoCreateLorebook(tpl, "npc");
-        return r?.success ? r.name : null;
+        const r = await autoCreateLorebook(tpl, "npc"); // сам привязывает через chat_metadata[METADATA_KEY] + saveMetadata
+        if (r?.success && r.name) {
+            // ST при авто-создании не подсвечивает кнопку «Chat Lorebook» — подтвердим привязку и UI
+            try { chat_metadata[METADATA_KEY] = r.name; $(".chat_lorebook_button").addClass("world_set"); } catch (e) {}
+            return r.name;
+        }
+        return null;
     } catch (e) { console.warn("[Режиссёр] лорбук:", e); return null; }
 }
 const isNpcEntry = (e) => !!(e && e[NPC_FLAG]);
