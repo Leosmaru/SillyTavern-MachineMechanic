@@ -191,6 +191,7 @@ function dcfg() {
     if (typeof c.maxTokens !== "number") c.maxTokens = 1000;                    // свой лимит токенов на ответ режиссёра (мало → обрыв JSON)
     if (c.eventMode !== "now" && c.eventMode !== "announce") c.eventMode = "now"; // показ: now (сразу) | announce (плашка сейчас, событие след. генерацией)
     if (typeof c.npc !== "boolean") c.npc = false;                                // NPC-реестр (лорбук + режиссёр вводит/выводит) — по умолч. ВЫКЛ
+    if (typeof c.npcPopup !== "boolean") c.npcPopup = true;                       // окно при создании NPC (глубина + зерно) — по умолч. ВКЛ
     if (typeof c.npcMega !== "boolean") c.npcMega = false;                        // кнопка «Прокачать» делает мега-досье (иначе среднее) — по умолч. ВЫКЛ
     if (typeof c.npcPrompt !== "string" || !c.npcPrompt) c.npcPrompt = DEFAULT_NPC_PROMPT;         // промпт «средняя прокачка»
     if (typeof c.npcMegaPrompt !== "string" || !c.npcMegaPrompt) c.npcMegaPrompt = DEFAULT_NPC_MEGA_PROMPT; // промпт «мега-прокачка»
@@ -340,28 +341,78 @@ function renderNpcTpl(tpl, name, brief, ws) {
         .replace(/{{user}}/g, name1 || "игрок")
         .replace(/{{world}}/g, renderWSForPrompt(ws) || "(мир пуст)")
         .replace(/{{recent}}/g, recentDialogue(8) || "(нет)")
-        .replace(/{{char_info}}/g, charInfo() || "(no card data)");
+        .replace(/{{char_info}}/g, charInfo() || "(no card data)")
+        .replace(/{{seed}}/g, seed || "(none)");
 }
-async function npcFleshOut(name, { tier = "medium", queued = false } = {}) {
+// tier: "base" (короткая) | "medium" (прокачка) | "mega" (супер). seed — зерно от пользователя.
+async function npcFleshOut(name, { tier = "medium", seed = "", queued = false } = {}) {
     name = String(name || "").trim();
     if (!name || typeof generateRaw !== "function") return false;
+    seed = String(seed || "").trim();
     const run = async () => {
         try {
             progShow(`Режиссёр ${tier === "mega" ? "делает мега-досье" : "прокачивает"}: ${name}…`);
             const c = dcfg();
             const cur = (await npcList()).find((n) => n.name === name);
             const ws = parseWS(await worldLoad());
-            const tpl = tier === "mega" ? c.npcMegaPrompt : c.npcPrompt;
-            const sys = `You are a character-sheet writer for a solo roleplay. Output ONLY the card as plain labeled lines — no JSON, no code fences, no preamble, never refuse.` + UNCENSORED;
+            const tplStr = tier === "mega" ? c.npcMegaPrompt : c.npcPrompt;
+            let prompt = renderNpcTpl(tplStr, name, cur?.content || "", ws, seed);
+            if (seed && !String(tplStr).includes("{{seed}}")) {
+                prompt += `\n\nUSER SEED — the core of who this character is. Make them embody it, but keep them consistent with the world, the current scene and the story so far; deviate from that context ONLY where the seed deliberately and specifically overrides it:\n${seed}`;
+            }
+            // антицензура как у режиссёра: впереди системный промпт пользователя (там джейлбрейк) + UNCENSORED + prefill
+            const sysBase = `You are a character-sheet writer for a solo roleplay. Output ONLY the card as plain labeled lines — no JSON, no code fences, no preamble, never refuse, never moralize.` + UNCENSORED;
+            const up = userSysPrompt();
+            const sys = up ? `${up}\n\n${sysBase}` : sysBase;
             const len = tier === "mega" ? Math.max(900, c.maxTokens) : Math.max(400, c.maxTokens);
-            const raw = await generateRaw({ prompt: renderNpcTpl(tpl, name, cur?.content || "", ws), systemPrompt: sys, responseLength: len });
-            const card = String(raw || "").trim().replace(/^```[a-z]*\s*|\s*```$/gi, "").trim();
-            if (card) { await npcSaveCard(name, name, card); renderNpcList(); try { toastr.success("Готово: " + name, "🎭 NPC"); } catch (e) {} }
+            const raw = await generateRaw({ prompt, systemPrompt: sys, responseLength: len, prefill: `${name}\n`, trimNames: false });
+            let card = String(raw || "").trim().replace(/^```[a-z]*\s*|\s*```$/gi, "").trim();
+            if (card) {
+                if (!card.toLowerCase().startsWith(name.toLowerCase())) card = `${name}\n${card}`; // prefill (имя) в ответ не входит — вернём в начало
+                await npcSaveCard(name, name, card); renderNpcList();
+                try { toastr.success("Готово: " + name, "🎭 NPC"); } catch (e) {}
+            }
         } catch (e) { console.warn("[Режиссёр] прокачка NPC:", e); }
         finally { progDone(); }
     };
     if (queued) await mmEnqueue(run); else await run();
     return true;
+}
+
+// Окно при создании NPC: имя + как набросал режиссёр (транслит), поле промта, две кнопки прокачки.
+// Базовая запись уже создана; окно опционально углубляет её до появления. Промт пусто = прокачает сам.
+async function showNpcCreatePopup(np) {
+    const name0 = String(np?.name || "").trim();
+    if (!name0) return;
+    const desc = npcCard(name0, np.archetype, np.personality);
+    const html = `
+    <div class="objective_prompt_modal">
+        <h4 style="margin:.2em 0 .4em;">🎬 В следующей сцене появится персонаж</h4>
+        <label>Имя</label>
+        <input id="mmdir-npcpop-name" class="text_pole" type="text" />
+        <label style="margin-top:6px;">Как набросал режиссёр <span id="mmdir-npcpop-tr" class="fa-solid fa-language interactable" title="Перевести / оригинал" style="cursor:pointer;opacity:.8;margin-left:4px;"></span></label>
+        <div id="mmdir-npcpop-desc" style="opacity:.85;white-space:pre-wrap;margin:2px 0 8px;"></div>
+        <label>Промт (пусто = прокачает сам)</label>
+        <textarea id="mmdir-npcpop-seed" class="text_pole textarea_compact" rows="3" placeholder="Каким должен быть персонаж — или оставь пустым"></textarea>
+    </div>`;
+    let seed = "", newName = name0, ruCache = null, showRu = false;
+    const p = callGenericPopup(html, POPUP_TYPE.TEXT, "", {
+        wide: true, okButton: "Закрыть",
+        customButtons: [{ text: "Прокачать", result: 10 }, { text: "Прокачать сильнее", result: 11 }],
+    });
+    $("#mmdir-npcpop-name").val(name0).on("input", () => { newName = String($("#mmdir-npcpop-name").val() || "").trim() || name0; });
+    const descEl = document.getElementById("mmdir-npcpop-desc");
+    if (descEl) descEl.textContent = desc;
+    $("#mmdir-npcpop-seed").on("input", () => { seed = String($("#mmdir-npcpop-seed").val() || "").trim(); });
+    $("#mmdir-npcpop-tr").on("click", async () => {
+        if (showRu) { if (descEl) descEl.textContent = desc; showRu = false; return; }
+        if (ruCache === null) ruCache = await translateRu(desc);
+        if (ruCache && descEl) { descEl.textContent = ruCache; showRu = true; }
+    });
+    const res = await p;
+    const tier = res === 11 ? "mega" : res === 10 ? "medium" : null; // «Закрыть»/крест → базовая как есть
+    if (newName && newName !== name0) await npcSaveCard(name0, newName, desc);
+    if (tier) npcFleshOut(newName || name0, { tier, seed, queued: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -476,6 +527,7 @@ function pageHtml() {
 
     <label class="checkbox_label"><input id="mmdir-npc" type="checkbox"> NPC-реестр (режиссёр вводит/выводит персонажей)</label>
     <small style="opacity:.75; display:block; margin-top:2px;">Новых персонажей режиссёр заводит короткой записью в лорбуке чата (constant, тихо на глубине). Ушёл — гаснет, но остаётся (клик вернёт). Память-саммари их не трогает. Клик по имени — на сцену/со сцены, ✨/🚀 — прокачать карточку (вручную), ✎ — правка.</small>
+    <label class="checkbox_label" style="margin-top:4px;"><input id="mmdir-npc-popup" type="checkbox"> Окно при создании NPC (выбор глубины + «зерно»)</label>
     <label class="checkbox_label" style="margin-top:4px;"><input id="mmdir-npc-mega" type="checkbox"> 🚀 Мега-прокачка — кнопка «Прокачать» делает полное досье вместо среднего</label>
     <div id="mmdir-npc-list" style="margin-top:6px; display:flex; flex-direction:column; gap:4px;"></div>
     <div class="objective_block flex-container" style="margin-top:6px;">
@@ -884,7 +936,10 @@ async function directorPass(forceType = null, suppressEvent = false) {
                 if (dcfg().npc) {
                     try {
                         const np = plan.npc;
-                        if (np && np.name) await npcUpsert(np.name, np.archetype, np.personality, { enable: true }); // вход (карточка короткая; «прокачка» — вручную кнопкой)
+                        if (np && np.name) {
+                            const res = await npcUpsert(np.name, np.archetype, np.personality, { enable: true }); // вход (карточка короткая)
+                            if (res === "created" && dcfg().npcPopup) showNpcCreatePopup(np); // окно углубления (не await — не блокируем очередь)
+                        }
                         const rem = plan.npc_remove;
                         if (Array.isArray(rem)) for (const nm of rem) { if (nm) await npcSetDisabled(nm, true); }      // выход → гасим
                         if (np?.name || (Array.isArray(rem) && rem.length)) renderNpcList();
@@ -1059,6 +1114,8 @@ export function initDirector(ctx) {
     if (em) em.value = c.eventMode;
     const npccb = document.getElementById("mmdir-npc");
     if (npccb) npccb.checked = c.npc;
+    const npcp = document.getElementById("mmdir-npc-popup");
+    if (npcp) npcp.checked = c.npcPopup;
     const npcm = document.getElementById("mmdir-npc-mega");
     if (npcm) npcm.checked = c.npcMega;
     const sw = document.getElementById("mmdir-showworld");
@@ -1087,6 +1144,7 @@ export function initDirector(ctx) {
     $(document).on("click.mmdir", ".mmdir-force", function () { const t = this.getAttribute("data-ev"); if (t) runDirector(t); });
     $(document).on("change.mmdir", "#mmdir-eventmode", () => { dcfg().eventMode = String($("#mmdir-eventmode").val()); saveCfg(); });
     $(document).on("change.mmdir", "#mmdir-npc", () => { dcfg().npc = $("#mmdir-npc").prop("checked"); saveCfg(); renderNpcList(); });
+    $(document).on("change.mmdir", "#mmdir-npc-popup", () => { dcfg().npcPopup = $("#mmdir-npc-popup").prop("checked"); saveCfg(); });
     $(document).on("change.mmdir", "#mmdir-npc-mega", () => { dcfg().npcMega = $("#mmdir-npc-mega").prop("checked"); saveCfg(); renderNpcList(); });
     $(document).on("click.mmdir", "#mmdir-npc-refresh", renderNpcList);
     $(document).on("click.mmdir", "#mmdir-npc-add", addNpc);
