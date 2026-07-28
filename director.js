@@ -844,20 +844,20 @@ function chargeEvent(ev, type) {
 // ---------------------------------------------------------------------------
 // Сам цикл режиссёра: смотрит сцену → обновляет мир + вбрасывает событие
 // ---------------------------------------------------------------------------
-async function runDirector(forceType = null) {
+async function runDirector(forceType = null, suppressEvent = false) {
     if (dirBusy) return;
     const chat = chatId();
     if (!chat || typeof generateRaw !== "function") return;
     dirBusy = true;
     if (mmBusy()) progShow("Режиссёр в очереди…"); // ждём, если дневник/другой прогон уже идёт
     try {
-        await mmEnqueue(() => directorPass(forceType)); // очередь пропускает сразу, если никто не занят
+        await mmEnqueue(() => directorPass(forceType, suppressEvent)); // очередь пропускает сразу, если никто не занят
     } finally {
         dirBusy = false;
     }
 }
 
-async function directorPass(forceType = null) {
+async function directorPass(forceType = null, suppressEvent = false) {
     try {
         progShow(forceType ? `Режиссёр: событие «${forceType}»…` : "Режиссёр смотрит на сцену…");
         const ws = parseWS(await worldLoad());
@@ -870,29 +870,34 @@ async function directorPass(forceType = null) {
         }
         if (dcfg().npc) {
             const active = await npcActiveNames();
-            prompt += `\n\nNPCs CURRENTLY ON SCENE: ${active.length ? active.join(", ") : "(none)"}.\n`
-                + `Add ONE more field to the JSON: "npc_remove": []. List the exact names of any on-scene NPC who CLEARLY left THIS turn (said goodbye, walked away, was sent off, died). If nobody left — "npc_remove": []. Never remove someone just to tidy up; a silent NPC stays.`;
+            prompt += `\n\nNPCs ALREADY ON SCENE: ${active.length ? active.join(", ") : "(none)"}.\n`
+                + `Do NOT re-introduce anyone already on scene: never emit a "visitor" event and never fill "npc" for a name in that list — they are ALREADY here, their arrival already happened. Use "visitor"/"npc" ONLY for a genuinely new person not in the list.\n`
+                + `Also add a field "npc_remove": [] — the exact names of any on-scene NPC who CLEARLY left THIS turn (said goodbye, walked away, was sent off, died); otherwise []. Never remove someone just to tidy up; a silent NPC stays.`;
         }
         const raw = await generateRaw({ prompt, systemPrompt: dirSys(), responseLength: dcfg().maxTokens });
         const plan = parsePlan(raw);
         if (plan) {
-            // при включённом NPC-реестре персонажи живут в лорбуке, не в World.md (иначе дубль)
+            // мир обновляем ВСЕГДА (в т.ч. пока событие живёт) — при NPC-реестре персонажи в лорбуке, не в World.md
             applyUpdates(ws, plan.world_updates, dcfg().npc ? null : plan.npc);
             await worldSave(renderWSMd(ws));
-            if (dcfg().npc) {
-                try {
-                    const np = plan.npc;
-                    if (np && np.name) await npcUpsert(np.name, np.archetype, np.personality, { enable: true }); // вход (карточка короткая; «прокачка» — вручную кнопкой)
-                    const rem = plan.npc_remove;
-                    if (Array.isArray(rem)) for (const nm of rem) { if (nm) await npcSetDisabled(nm, true); }      // выход → гасим
-                    if (np?.name || (Array.isArray(rem) && rem.length)) renderNpcList();
-                } catch (e) { console.warn("[Режиссёр] NPC:", e); }
-            }
             const ev = String(plan.event_text || "").trim();
-            if (ev) {
-                chargeEvent(ev, plan.event_type);
+            if (suppressEvent) {
+                // прежнее событие ещё не израсходовано — мир обновили, новый бит (событие/NPC) не заряжаем
             } else {
-                try { toastr.info("Спокойный ход, событий нет — мир обновлён", "🎬 Режиссёр", { timeOut: 3000 }); } catch (e) {}
+                if (dcfg().npc) {
+                    try {
+                        const np = plan.npc;
+                        if (np && np.name) await npcUpsert(np.name, np.archetype, np.personality, { enable: true }); // вход (карточка короткая; «прокачка» — вручную кнопкой)
+                        const rem = plan.npc_remove;
+                        if (Array.isArray(rem)) for (const nm of rem) { if (nm) await npcSetDisabled(nm, true); }      // выход → гасим
+                        if (np?.name || (Array.isArray(rem) && rem.length)) renderNpcList();
+                    } catch (e) { console.warn("[Режиссёр] NPC:", e); }
+                }
+                if (ev) {
+                    chargeEvent(ev, plan.event_type);
+                } else {
+                    try { toastr.info("Спокойный ход, событий нет — мир обновлён", "🎬 Режиссёр", { timeOut: 3000 }); } catch (e) {}
+                }
             }
         } else {
             console.warn("[Режиссёр] не смог распарсить JSON:", (raw || "").slice(0, 300));
@@ -1018,14 +1023,17 @@ function restoreEventBadges() {
 // раз в N ответов персонажа: сначала снять «прожитое» событие, потом при необходимости запустить режиссёра
 function onCharMessage() {
     const c = dcfg();
-    // свайп/перегенерация: событие НЕ снимаем (инъекция жива для нового варианта), только перерисуем плашку
-    if (lastWasSwipe) { lastWasSwipe = false; if (pendingEvent) renderEventBadge(pendingEvent.text, pendingEvent.type); return; }
+    // свайп/перегенерация: инъекция жива для нового варианта, плашку перерисуем. Помечаем «использовано»,
+    // иначе после свайпа обычная ветка нарисует ту же плашку ещё раз на новом сообщении (и инъекция не снимется).
+    if (lastWasSwipe) { lastWasSwipe = false; if (pendingEvent) { eventUsed = true; renderEventBadge(pendingEvent.text, pendingEvent.type); } return; }
     // свежий ответ отыграл заряженное событие → плашка + пометка «использовано» (расход будет при следующем сообщении игрока)
     if (pendingEvent && !eventUsed) { eventUsed = true; renderEventBadge(pendingEvent.text, pendingEvent.type); }
     if (!c.enabled || c.interval <= 0) return;
     let lastType = ""; try { lastType = substituteParams("{{lastGenerationType}}"); } catch (e) {}
     if (["continue", "quiet", "impersonate"].includes(lastType)) return;
-    if (--dirCounter <= 0) { dirCounter = c.interval; runDirector(); }
+    // мир обновляем всегда; но пока прежнее событие не израсходовано — новое событие/NPC НЕ заряжаем
+    // (иначе на малой частоте режиссёр перезарядит то же событие в след. генерацию → эхо/дубль плашки)
+    if (--dirCounter <= 0) { dirCounter = c.interval; runDirector(null, !!pendingEvent); }
 }
 
 // ---------------------------------------------------------------------------
