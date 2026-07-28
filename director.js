@@ -22,7 +22,7 @@ import { extension_settings, saveMetadataDebounced } from "../../../extensions.j
 import { callGenericPopup, POPUP_TYPE } from "../../../popup.js";
 import { mmEnqueue, mmBusy } from "./mmQueue.js";
 import { power_user } from "../../../power-user.js";
-import { loadWorldInfo, saveWorldInfo, createWorldInfoEntry, METADATA_KEY, world_names } from "../../../world-info.js";
+import { loadWorldInfo, saveWorldInfo, createWorldInfoEntry, updateWorldInfoList, METADATA_KEY, world_names } from "../../../world-info.js";
 import { autoCreateLorebook } from "./autocreate.js";
 
 const API = "/api/plugins/soul-md";
@@ -280,18 +280,28 @@ function boundLorebook() {
 // найти лорбук; если у чата ещё нет — создать/привязать конвенцией памяти (её же имя-шаблон),
 // чтобы мод памяти увидел его своим и не предлагал создавать заново
 async function ensureLorebook() {
-    const n = boundLorebook();
-    if (n) return n;
+    let name = boundLorebook();
+    if (!name) {
+        try {
+            const tpl = extension_settings.STMemoryBooks?.moduleSettings?.lorebookNameTemplate || "LTM - {{char}} - {{chat}}";
+            const r = await autoCreateLorebook(tpl, "npc"); // createNewWorldInfo обновляет список и выбирает лорбук в редакторе
+            if (r?.success && r.name) name = r.name;
+        } catch (e) { console.warn("[Режиссёр] лорбук:", e); }
+    }
+    if (!name) return null;
+    try { chat_metadata[METADATA_KEY] = name; await saveMetadata(); await reflectLorebookInUI(name); } catch (e) {}
+    return name;
+}
+// показать лорбук в книжке (WI-дровер) сразу, как это делает память: обновить список + выбрать в редакторе
+async function reflectLorebookInUI(name) {
     try {
-        const tpl = extension_settings.STMemoryBooks?.moduleSettings?.lorebookNameTemplate || "LTM - {{char}} - {{chat}}";
-        const r = await autoCreateLorebook(tpl, "npc"); // сам привязывает через chat_metadata[METADATA_KEY] + saveMetadata
-        if (r?.success && r.name) {
-            // подтвердим привязку (страховка на новый чат) + сохраним + подсветим кнопку «Chat Lorebook»
-            try { chat_metadata[METADATA_KEY] = r.name; await saveMetadata(); $(".chat_lorebook_button").addClass("world_set"); } catch (e) {}
-            return r.name;
-        }
-        return null;
-    } catch (e) { console.warn("[Режиссёр] лорбук:", e); return null; }
+        await updateWorldInfoList();                       // список миров в дровере + world_names
+        $(".chat_lorebook_button").addClass("world_set");  // подсветка chat-lorebook
+        const drawerClosed = document.getElementById("WIDrawerIcon")?.classList.contains("closedIcon");
+        const idx = Array.isArray(world_names) ? world_names.indexOf(name) : -1;
+        // выбрать в редакторе (покажет записи) — только если дровер закрыт, чтобы не сбить твою правку
+        if (drawerClosed && idx !== -1) $("#world_editor_select").val(idx).trigger("change");
+    } catch (e) { console.warn("[Режиссёр] отражение лорбука в UI:", e); }
 }
 const isNpcEntry = (e) => !!(e && e[NPC_FLAG]);
 function findNpcEntry(data, name) {
