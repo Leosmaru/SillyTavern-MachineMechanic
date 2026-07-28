@@ -330,6 +330,14 @@ async function reflectLorebookInUI(name) {
         if (drawerClosed && idx !== -1) $("#world_editor_select").val(idx).trigger("change");
     } catch (e) { console.warn("[Режиссёр] отражение лорбука в UI:", e); }
 }
+// перечитать лорбук в редакторе WI, если он сейчас там открыт — чтобы новые/изменённые NPC были видны сразу
+function wiEditorRefresh(name) {
+    try {
+        const idx = Array.isArray(world_names) ? world_names.indexOf(name) : -1;
+        const sel = document.getElementById("world_editor_select");
+        if (idx !== -1 && sel && String(sel.value) === String(idx)) $(sel).val(idx).trigger("change");
+    } catch (e) {}
+}
 const isNpcEntry = (e) => !!(e && e[NPC_FLAG]);
 function findNpcEntry(data, name) {
     return Object.values(data?.entries || {}).find((e) => isNpcEntry(e) && (e.mm_npc_name === name || (Array.isArray(e.key) && e.key.includes(name))));
@@ -350,7 +358,7 @@ async function npcUpsert(name, archetype, personality, { enable = true } = {}) {
     e.constant = true; e.vectorized = false; e.selective = false;
     e.position = NPC_POS_ATDEPTH; e.depth = 4; e.role = 0; e.addMemo = true;
     if (enable) e.disable = false;
-    await saveWorldInfo(lb, data, true);
+    await saveWorldInfo(lb, data, true); wiEditorRefresh(lb);
     return isNew ? "created" : "updated";
 }
 // вкл/выкл запись (выход = disable:true; возврат = disable:false)
@@ -359,7 +367,7 @@ async function npcSetDisabled(name, disabled) {
     const data = await loadWorldInfo(lb); if (!data) return false;
     const e = findNpcEntry(data, String(name || "").trim()); if (!e) return false;
     e.disable = !!disabled;
-    await saveWorldInfo(lb, data, true);
+    await saveWorldInfo(lb, data, true); wiEditorRefresh(lb);
     return true;
 }
 // сохранить отредактированную вручную карточку (имя/текст)
@@ -370,7 +378,7 @@ async function npcSaveCard(oldName, name, content) {
     name = String(name || "").trim() || oldName;
     e.mm_npc_name = name; e.key = [name]; e.comment = npcComment(name);
     e.content = String(content || "");
-    await saveWorldInfo(lb, data, true);
+    await saveWorldInfo(lb, data, true); wiEditorRefresh(lb);
     return true;
 }
 // удалить NPC насовсем: запись из лорбука + из World.md (ws.npcs), если он там есть
@@ -381,7 +389,7 @@ async function npcDelete(name) {
     if (lb) {
         const data = await loadWorldInfo(lb);
         const e = data && findNpcEntry(data, name);
-        if (e && data.entries) { delete data.entries[e.uid]; await saveWorldInfo(lb, data, true); }
+        if (e && data.entries) { delete data.entries[e.uid]; await saveWorldInfo(lb, data, true); wiEditorRefresh(lb); }
     }
     try {
         const ws = parseWS(await worldLoad());
