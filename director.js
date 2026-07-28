@@ -380,7 +380,7 @@ async function npcActiveNames() { return (await npcList()).filter((n) => !n.disa
 // «Прокачать» NPC: короткую карточку режиссёра превращает в досье отдельной генерацией.
 // Тир: "medium" (средняя) или "mega" (полное досье). Пишется в ту же запись (constant, глубина 4).
 // Только вручную кнопкой; язык — как в истории чата. Промпты редактируемые (c.npcPrompt / c.npcMegaPrompt).
-function renderNpcTpl(tpl, name, brief, ws) {
+function renderNpcTpl(tpl, name, brief, ws, seed = "") {
     return String(tpl || DEFAULT_NPC_PROMPT)
         .replace(/{{name}}/g, name || "the character")
         .replace(/{{brief}}/g, brief || "(no details yet)")
@@ -397,6 +397,7 @@ async function npcFleshOut(name, { tier = "medium", seed = "", queued = false } 
     if (!name || typeof generateRaw !== "function") return false;
     seed = String(seed || "").trim();
     const run = async () => {
+        let doneMsg = "Прокачка не удалась";
         try {
             progShow(`Режиссёр ${tier === "mega" ? "делает мега-досье" : tier === "base" ? "оформляет" : "прокачивает"}: ${name}…`);
             const c = dcfg();
@@ -418,10 +419,11 @@ async function npcFleshOut(name, { tier = "medium", seed = "", queued = false } 
             if (card) {
                 if (!card.toLowerCase().startsWith(name.toLowerCase())) card = `${name}\n${card}`; // prefill (имя) в ответ не входит — вернём в начало
                 await npcSaveCard(name, name, card); renderNpcList();
+                doneMsg = "Досье готово: " + name;
                 try { toastr.success("Готово: " + name, "🎭 NPC"); } catch (e) {}
             }
         } catch (e) { console.warn("[Режиссёр] прокачка NPC:", e); }
-        finally { progDone(); }
+        finally { progDone(doneMsg); }
     };
     if (queued) await mmEnqueue(run); else await run();
     return true;
@@ -511,11 +513,11 @@ function progShow(text) {
     b.style.display = "flex";
     b.innerHTML = `<span class="mm-sp-title">🎬 ${text}</span>`;
 }
-function progDone() {
+function progDone(msg) {
     const b = document.getElementById("mm-dir-prog");
     if (!b) return;
     const t = b.querySelector(".mm-sp-title");
-    if (t) t.textContent = "🎬 Мир обновлён";
+    if (t) t.textContent = "🎬 " + (msg || "Мир обновлён");
     setTimeout(() => { const x = document.getElementById("mm-dir-prog"); if (x) x.style.display = "none"; }, 2500);
 }
 
