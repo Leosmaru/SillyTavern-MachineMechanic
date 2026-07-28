@@ -22,8 +22,8 @@ import { extension_settings, saveMetadataDebounced } from "../../../extensions.j
 import { callGenericPopup, POPUP_TYPE } from "../../../popup.js";
 import { mmEnqueue, mmBusy } from "./mmQueue.js";
 import { power_user } from "../../../power-user.js";
-import { loadWorldInfo, saveWorldInfo, createWorldInfoEntry, updateWorldInfoList, METADATA_KEY, world_names } from "../../../world-info.js";
-import { autoCreateLorebook } from "./autocreate.js";
+import { loadWorldInfo, saveWorldInfo, createWorldInfoEntry, createNewWorldInfo, updateWorldInfoList, METADATA_KEY, world_names } from "../../../world-info.js";
+import { autoCreateLorebook, generateLorebookName } from "./autocreate.js";
 
 const API = "/api/plugins/soul-md";
 const INJECT_KEY = "MM_DIRECTOR";
@@ -414,10 +414,11 @@ async function npcFleshOut(name, { tier = "medium", seed = "", queued = false } 
             const up = userSysPrompt();
             const sys = up ? `${up}\n\n${sysBase}` : sysBase;
             const len = tier === "mega" ? Math.max(900, c.maxTokens) : tier === "base" ? Math.max(300, c.maxTokens) : Math.max(400, c.maxTokens);
-            const raw = await generateRaw({ prompt, systemPrompt: sys, responseLength: len, prefill: `${name}\n`, trimNames: false });
+            // без prefill: reasoning-модели (GLM-5 и др.) на подставленной реплике ассистента отдают content:null
+            const raw = await generateRaw({ prompt, systemPrompt: sys, responseLength: len });
             let card = String(raw || "").trim().replace(/^```[a-z]*\s*|\s*```$/gi, "").trim();
             if (card) {
-                if (!card.toLowerCase().startsWith(name.toLowerCase())) card = `${name}\n${card}`; // prefill (имя) в ответ не входит — вернём в начало
+                if (!card.toLowerCase().startsWith(name.toLowerCase())) card = `${name}\n${card}`; // если модель не начала с имени — добавим
                 await npcSaveCard(name, name, card); renderNpcList();
                 doneMsg = "Досье готово: " + name;
                 try { toastr.success("Готово: " + name, "🎭 NPC"); } catch (e) {}
