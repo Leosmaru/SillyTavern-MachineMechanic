@@ -439,12 +439,22 @@ async function showNpcCreatePopup(np) {
             <input id="mmdir-npcpop-mega" class="menu_button" type="button" value="Прокачать сильнее" />
         </div>
     </div>`;
-    let seed = "", newName = name0, mode = null, ruCache = null, showRu = false;
-    const p = callGenericPopup(html, POPUP_TYPE.TEXT, "", { wide: true, okButton: "Применить" });
-    $("#mmdir-npcpop-name").val(name0).on("input", () => { newName = String($("#mmdir-npcpop-name").val() || "").trim() || name0; });
+    let mode = null, ruCache = null, showRu = false;
+    const picked = { nm: name0, seed: "" };
+    const p = callGenericPopup(html, POPUP_TYPE.TEXT, "", {
+        wide: true, okButton: "Применить",
+        // читаем поля из DOM В МОМЕНТ ЗАКРЫТИЯ (пока DOM жив) — надёжнее input-событий на мобиле
+        onClosing: () => {
+            try {
+                picked.nm = String($("#mmdir-npcpop-name").val() || name0).trim() || name0;
+                picked.seed = String($("#mmdir-npcpop-seed").val() || "").trim();
+            } catch (e) {}
+            return true;
+        },
+    });
     const descEl = document.getElementById("mmdir-npcpop-desc");
+    $("#mmdir-npcpop-name").val(name0);
     if (descEl) descEl.textContent = desc;
-    $("#mmdir-npcpop-seed").on("input", () => { seed = String($("#mmdir-npcpop-seed").val() || "").trim(); });
     const paint = () => {
         for (const [id, m] of [["mmdir-npcpop-med", "medium"], ["mmdir-npcpop-mega", "mega"]]) {
             const el = document.getElementById(id); if (!el) continue;
@@ -463,10 +473,13 @@ async function showNpcCreatePopup(np) {
     });
     const res = await p;
     if (!res) return; // крест → как есть
-    const nm = String(newName || name0).trim() || name0;
+    const nm = picked.nm, seed = picked.seed;
     if (nm !== name0) await npcSaveCard(name0, nm, desc);
     const tier = mode || (seed ? "base" : null); // режим не выбран + промт → слабая; иначе как есть
-    if (tier) npcFleshOut(nm, { tier, seed, queued: true });
+    if (tier) {
+        try { toastr.info("Прокачиваю: " + nm, "🎬 NPC", { timeOut: 2500 }); } catch (e) {}
+        npcFleshOut(nm, { tier, seed, queued: true });
+    }
 }
 
 // ---------------------------------------------------------------------------
