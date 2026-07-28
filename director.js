@@ -1265,9 +1265,12 @@ export function initDirector(ctx) {
         try { setExtensionPrompt(INJECT_KEY, "", 1, dcfg().depth); } catch (e) {}
         clearWorldInjection();
         setTimeout(restoreEventBadges, 600);
-        setTimeout(renderNpcList, 700); // лорбук привязан к новому чату — перечитать список
+        // NPC-реестр вкл и лорбук ещё не привязан → сразу создаём/привязываем (как память), чтобы он
+        // был в книжке с самого начала, а не лениво при первом NPC. Затем перечитываем список.
+        setTimeout(async () => { try { if (dcfg().npc && !boundLorebook()) await ensureLorebook(); } catch (e) {} renderNpcList(); }, 700);
     });
     dirCounter = c.interval;
     setTimeout(restoreEventBadges, 800);
-    setTimeout(renderNpcList, 900);
+    // чат уже открыт при загрузке плагина → тоже привязать лорбук сразу, если NPC-реестр вкл
+    setTimeout(async () => { try { if (dcfg().npc && chatId() && !boundLorebook()) await ensureLorebook(); } catch (e) {} renderNpcList(); }, 1000);
 }
