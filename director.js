@@ -190,7 +190,6 @@ function dcfg() {
     if (typeof c.depth !== "number") c.depth = 1;                               // глубина инъекции события
     if (typeof c.maxTokens !== "number") c.maxTokens = 1000;                    // свой лимит токенов на ответ режиссёра (мало → обрыв JSON)
     if (c.eventMode !== "now" && c.eventMode !== "announce") c.eventMode = "now"; // показ: now (сразу) | announce (плашка сейчас, событие след. генерацией)
-    if (typeof c.hardDirective !== "boolean") c.hardDirective = false;            // жёсткая директива (заставлять модель) — по умолч. ВЫКЛ
     if (typeof c.npc !== "boolean") c.npc = false;                                // NPC-реестр (лорбук + режиссёр вводит/выводит) — по умолч. ВЫКЛ
     if (typeof c.npcMega !== "boolean") c.npcMega = false;                        // кнопка «Прокачать» делает мега-досье (иначе среднее) — по умолч. ВЫКЛ
     if (typeof c.npcPrompt !== "string" || !c.npcPrompt) c.npcPrompt = DEFAULT_NPC_PROMPT;         // промпт «средняя прокачка»
@@ -443,7 +442,6 @@ function pageHtml() {
             <option value="now">Настоящее событие (сразу, в сообщении)</option>
             <option value="announce">Анонс (плашка сейчас, событие — следующей генерацией)</option>
         </select>
-        <label class="checkbox_label" style="margin-top:6px;"><input id="mmdir-hard" type="checkbox"> Жёсткая директива (заставлять модель отыграть)</label>
         <label class="checkbox_label" style="margin-top:6px;"><input id="mmdir-showworld" type="checkbox"> Давать персонажу состояние мира</label>
         <small>Состояние из World.md идёт в промпт как тихий фон (SYSTEM, как дневник), не как событие. По умолч. выкл.</small>
     </div>
@@ -798,10 +796,9 @@ function parsePlan(raw) {
 // Как в Soul of Waifu: событие — реплика НАРРАТОРА в потоке (роль USER), а не system-приписка сбоку.
 // Персонаж отвечает на неё как на сцену. Метка [Narrator] — чтобы не спутал с речью игрока.
 function eventDirective(ev) {
-    const who = name2 || "the character";
-    if (dcfg().hardDirective) // жёстче: прямой наказ отыграть в этом же ответе
-        return `[Narrator — this happens in the scene RIGHT NOW; ${who} must notice it and react to it in THIS very reply]: ${ev}`;
-    return `[Narrator]: ${ev}`; // просто сцена — персонаж реагирует, как в Soul of Waifu
+    // роль USER + глубина 0 — это уже самый сильный рычаг (персонаж отвечает на реплику нарратора),
+    // напор поверх не нужен. Просто сцена, как в Soul of Waifu.
+    return `[Narrator]: ${ev}`;
 }
 // роль USER (1) + глубина 0 — событие встаёт как самая свежая реплика сцены, на которую пишется ответ (ключевое отличие от system-вставки)
 function setInjection(text) { try { setExtensionPrompt(INJECT_KEY, eventDirective(text), 1, 0, false, 1); } catch (e) {} }
@@ -1060,8 +1057,6 @@ export function initDirector(ctx) {
     if (ps) { ps.innerHTML = PRESET_KEYS.map((k) => `<option value="${k.replace(/"/g, "&quot;")}">${k}</option>`).join(""); ps.value = c.preset; }
     const em = document.getElementById("mmdir-eventmode");
     if (em) em.value = c.eventMode;
-    const hd = document.getElementById("mmdir-hard");
-    if (hd) hd.checked = c.hardDirective;
     const npccb = document.getElementById("mmdir-npc");
     if (npccb) npccb.checked = c.npc;
     const npcm = document.getElementById("mmdir-npc-mega");
@@ -1091,7 +1086,6 @@ export function initDirector(ctx) {
     });
     $(document).on("click.mmdir", ".mmdir-force", function () { const t = this.getAttribute("data-ev"); if (t) runDirector(t); });
     $(document).on("change.mmdir", "#mmdir-eventmode", () => { dcfg().eventMode = String($("#mmdir-eventmode").val()); saveCfg(); });
-    $(document).on("change.mmdir", "#mmdir-hard", () => { dcfg().hardDirective = $("#mmdir-hard").prop("checked"); saveCfg(); });
     $(document).on("change.mmdir", "#mmdir-npc", () => { dcfg().npc = $("#mmdir-npc").prop("checked"); saveCfg(); renderNpcList(); });
     $(document).on("change.mmdir", "#mmdir-npc-mega", () => { dcfg().npcMega = $("#mmdir-npc-mega").prop("checked"); saveCfg(); renderNpcList(); });
     $(document).on("click.mmdir", "#mmdir-npc-refresh", renderNpcList);
