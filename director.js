@@ -336,6 +336,25 @@ async function npcSaveCard(oldName, name, content) {
     await saveWorldInfo(lb, data, true);
     return true;
 }
+// удалить NPC насовсем: запись из лорбука + из World.md (ws.npcs), если он там есть
+async function npcDelete(name) {
+    name = String(name || "").trim();
+    if (!name) return false;
+    const lb = boundLorebook();
+    if (lb) {
+        const data = await loadWorldInfo(lb);
+        const e = data && findNpcEntry(data, name);
+        if (e && data.entries) { delete data.entries[e.uid]; await saveWorldInfo(lb, data, true); }
+    }
+    try {
+        const ws = parseWS(await worldLoad());
+        if (Array.isArray(ws.npcs) && ws.npcs.some((n) => n.name === name)) {
+            ws.npcs = ws.npcs.filter((n) => n.name !== name);
+            await worldSave(renderWSMd(ws));
+        }
+    } catch (e) { console.warn("[Режиссёр] удаление NPC из мира:", e); }
+    return true;
+}
 // список NPC этого чата: [{name, content, disabled}]
 async function npcList() {
     const lb = boundLorebook(); if (!lb) return [];
@@ -561,7 +580,7 @@ function pageHtml() {
     <hr class="m-t-1 m-b-1">
 
     <label class="checkbox_label"><input id="mmdir-npc" type="checkbox"> NPC-реестр (режиссёр вводит/выводит персонажей)</label>
-    <small style="opacity:.75; display:block; margin-top:2px;">Новых персонажей режиссёр заводит короткой записью в лорбуке чата (constant, тихо на глубине). Ушёл — гаснет, но остаётся (клик вернёт). Память-саммари их не трогает. Клик по имени — на сцену/со сцены, ✨/🚀 — прокачать карточку (вручную), ✎ — правка.</small>
+    <small style="opacity:.75; display:block; margin-top:2px;">Новых персонажей режиссёр заводит короткой записью в лорбуке чата (constant, тихо на глубине). Ушёл — гаснет, но остаётся (клик вернёт). Память-саммари их не трогает. Клик по имени — на сцену/со сцены, ✨/🚀 — прокачать, ✎ — правка, 🗑 — удалить.</small>
     <label class="checkbox_label" style="margin-top:4px;"><input id="mmdir-npc-popup" type="checkbox"> Окно при создании NPC (выбор глубины + «зерно»)</label>
     <label class="checkbox_label" style="margin-top:4px;"><input id="mmdir-npc-mega" type="checkbox"> 🚀 Мега-прокачка — кнопка «Прокачать» делает полное досье вместо среднего</label>
     <div id="mmdir-npc-list" style="margin-top:6px; display:flex; flex-direction:column; gap:4px;"></div>
@@ -627,10 +646,20 @@ async function renderNpcList() {
         edit.title = "Редактировать персонажа";
         edit.style.cssText = "cursor:pointer; opacity:.7;";
         edit.addEventListener("click", () => editNpc(n));
+        const del = document.createElement("span");
+        del.className = "fa-solid fa-trash-can interactable";
+        del.title = "Удалить персонажа (из лорбука и World.md)";
+        del.style.cssText = "cursor:pointer; opacity:.6;";
+        del.addEventListener("click", async () => {
+            const ok = await callGenericPopup(`Удалить NPC «${n.name}» насовсем — из лорбука и World.md?`, POPUP_TYPE.CONFIRM);
+            if (!ok) return;
+            await npcDelete(n.name); renderNpcList();
+            try { toastr.info("Удалён: " + n.name, "🎭 NPC"); } catch (e) {}
+        });
         const desc = document.createElement("small");
         desc.style.cssText = "opacity:.6; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0;";
         desc.textContent = n.content;
-        row.appendChild(chip); row.appendChild(flesh); row.appendChild(edit); row.appendChild(desc);
+        row.appendChild(chip); row.appendChild(flesh); row.appendChild(edit); row.appendChild(del); row.appendChild(desc);
         host.appendChild(row);
     }
 }
