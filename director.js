@@ -23,7 +23,7 @@ import { callGenericPopup, POPUP_TYPE } from "../../../popup.js";
 import { mmEnqueue, mmBusy } from "./mmQueue.js";
 import { power_user } from "../../../power-user.js";
 import { loadWorldInfo, saveWorldInfo, createWorldInfoEntry, createNewWorldInfo, updateWorldInfoList, METADATA_KEY, world_names } from "../../../world-info.js";
-import { autoCreateLorebook, generateLorebookName } from "./autocreate.js";
+import { generateLorebookName } from "./autocreate.js";
 
 const API = "/api/plugins/soul-md";
 const INJECT_KEY = "MM_DIRECTOR";
@@ -281,16 +281,43 @@ function boundLorebook() {
 // чтобы мод памяти увидел его своим и не предлагал создавать заново
 async function ensureLorebook() {
     let name = boundLorebook();
-    if (!name) {
-        try {
-            const tpl = extension_settings.STMemoryBooks?.moduleSettings?.lorebookNameTemplate || "LTM - {{char}} - {{chat}}";
-            const r = await autoCreateLorebook(tpl, "npc"); // createNewWorldInfo обновляет список и выбирает лорбук в редакторе
-            if (r?.success && r.name) name = r.name;
-        } catch (e) { console.warn("[Режиссёр] лорбук:", e); }
-    }
-    if (!name) return null;
+    if (name) return name;                       // уже привязан (в т.ч. если создала память) — используем его
+    name = await askCreateLorebook();            // попап по схеме памяти: создать (имя своё) / выбрать / отмена
+    if (!name) return null;                       // отмена → персонаж не создаётся (сообщит вызывающий)
     try { chat_metadata[METADATA_KEY] = name; await saveMetadata(); await reflectLorebookInUI(name); } catch (e) {}
     return name;
+}
+// попап выбора/создания лорбука для NPC (как книга памяти). Имя можно любое, без разметки.
+async function askCreateLorebook() {
+    let suggested = "";
+    try { suggested = generateLorebookName(extension_settings.STMemoryBooks?.moduleSettings?.lorebookNameTemplate || "LTM - {{char}} - {{chat}}"); } catch (e) {}
+    const existing = Array.isArray(world_names) ? world_names.slice() : [];
+    const opts = ['<option value="">— создать новый (имя ниже) —</option>']
+        .concat(existing.map((w) => `<option value="${String(w).replace(/"/g, "&quot;")}">${w}</option>`)).join("");
+    const html = `
+    <div class="objective_prompt_modal">
+        <h4 style="margin:.2em 0 .4em;">🎬 Лорбук для персонажей и памяти</h4>
+        <small>У этого чата нет привязанного лорбука. Создай новый (имя любое) или выбери существующий. Отмена — персонаж не создастся.</small>
+        <label style="margin-top:8px;">Имя нового лорбука</label>
+        <input id="mmdir-lb-name" class="text_pole" type="text" />
+        <label style="margin-top:6px;">…или выбрать существующий</label>
+        <select id="mmdir-lb-existing" class="text_pole">${opts}</select>
+    </div>`;
+    const picked = { name: "", existing: "" };
+    const p = callGenericPopup(html, POPUP_TYPE.TEXT, "", {
+        wide: true, okButton: "Создать / привязать", cancelButton: "Отмена",
+        onClosing: () => { try { picked.name = String($("#mmdir-lb-name").val() || "").trim(); picked.existing = String($("#mmdir-lb-existing").val() || "").trim(); } catch (e) {} return true; },
+    });
+    $("#mmdir-lb-name").val(suggested);
+    const res = await p;
+    if (!res) return null;                                           // отмена/крест
+    if (picked.existing && existing.includes(picked.existing)) return picked.existing; // выбрал существующий
+    const nm = picked.name || suggested;
+    if (!nm) return null;
+    if (existing.includes(nm)) return nm;                            // имя уже есть → просто привяжем
+    try { const ok = await createNewWorldInfo(nm); if (!ok) return null; } // создать новый (обновляет список WI сам)
+    catch (e) { console.warn("[Режиссёр] createNewWorldInfo:", e); return null; }
+    return nm;
 }
 // показать лорбук в книжке (WI-дровер) сразу, как это делает память: обновить список + выбрать в редакторе
 async function reflectLorebookInUI(name) {
@@ -1029,6 +1056,7 @@ async function directorPass(forceType = null, suppressEvent = false) {
                         if (np && np.name) {
                             const res = await npcUpsert(np.name, np.archetype, np.personality, { enable: true }); // вход (карточка короткая)
                             if (res === "created" && dcfg().npcPopup) showNpcCreatePopup(np); // окно углубления (не await — не блокируем очередь)
+                            else if (!res) { try { toastr.warning(`Персонаж «${np.name}» не создан — лорбук не выбран`, "🎬 Режиссёр"); } catch (e) {} } // отмена лорбука
                         }
                         const rem = plan.npc_remove;
                         if (Array.isArray(rem)) for (const nm of rem) { if (nm) await npcSetDisabled(nm, true); }      // выход → гасим
@@ -1266,12 +1294,9 @@ export function initDirector(ctx) {
         try { setExtensionPrompt(INJECT_KEY, "", 1, dcfg().depth); } catch (e) {}
         clearWorldInjection();
         setTimeout(restoreEventBadges, 600);
-        // NPC-реестр вкл и лорбук ещё не привязан → сразу создаём/привязываем (как память), чтобы он
-        // был в книжке с самого начала, а не лениво при первом NPC. Затем перечитываем список.
-        setTimeout(async () => { try { if (dcfg().npc && !boundLorebook()) await ensureLorebook(); } catch (e) {} renderNpcList(); }, 700);
+        setTimeout(renderNpcList, 700);
     });
     dirCounter = c.interval;
     setTimeout(restoreEventBadges, 800);
-    // чат уже открыт при загрузке плагина → тоже привязать лорбук сразу, если NPC-реестр вкл
-    setTimeout(async () => { try { if (dcfg().npc && chatId() && !boundLorebook()) await ensureLorebook(); } catch (e) {} renderNpcList(); }, 1000);
+    setTimeout(renderNpcList, 900);
 }
