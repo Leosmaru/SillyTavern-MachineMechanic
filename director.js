@@ -132,7 +132,7 @@ const DEFAULT_PROMPT = PRESETS[PRESET_KEYS[0]];
 // Промпт «Раскрыть NPC» — из краткого наброска режиссёра лепит полноценную карточку
 // (по принципам гайда character card), опираясь на контекст истории. Редактируется в UI.
 const DEFAULT_NPC_PROMPT =
-`Write a compact CHARACTER CARD for a minor character named {{name}}, so {{char}} can portray them consistently in a solo roleplay with {{user}}. Ground everything in the world, the story so far and {{char}}'s own card. Write in the LANGUAGE OF THE STORY. Vivid but tight — a working card, not an essay. No contradictions.
+`Write a compact CHARACTER CARD for a minor character named {{name}}, so {{char}} can portray them consistently in a solo roleplay with {{user}}. Ground everything in the world, the story so far and {{char}}'s own card. ALWAYS write in English, even if the story is in another language. Vivid but tight — a working card, not an essay. No contradictions.
 
 Produce these labeled blocks:
 - Description: defining appearance, how they carry themselves, one memorable quirk.
@@ -155,7 +155,7 @@ Output ONLY the card as plain labeled lines — no JSON, no code fences, no prea
 
 // «Мега-прокачка» — полное, богатое досье по всем разделам гайда (дороже по токенам).
 const DEFAULT_NPC_MEGA_PROMPT =
-`Write a FULL, richly-detailed CHARACTER CARD for {{name}}, a character in an ongoing solo roleplay with {{user}}, so {{char}} can portray them vividly and consistently. Apply the craft of an excellent character card. Ground everything in the world, the story so far and {{char}}'s own card. Write in the LANGUAGE OF THE STORY. No contradictions.
+`Write a FULL, richly-detailed CHARACTER CARD for {{name}}, a character in an ongoing solo roleplay with {{user}}, so {{char}} can portray them vividly and consistently. Apply the craft of an excellent character card. Ground everything in the world, the story so far and {{char}}'s own card. ALWAYS write in English, even if the story is in another language. No contradictions.
 
 Produce these labeled blocks, each properly fleshed out:
 - Description: a vivid at-a-glance snapshot — defining appearance, demeanor, one memorable quirk.
@@ -180,7 +180,7 @@ Output ONLY the card as plain labeled blocks — no JSON, no code fences, no pre
 
 // Слабая прокачка (режим не выбран, но задан промт) — короткая карточка (2-3 строки) по промту/контексту.
 const DEFAULT_NPC_BASE_PROMPT =
-`Write a SHORT card (2-3 lines) for a minor character named {{name}}, so {{char}} can portray them. Keep it consistent with the world, the current scene and the story so far. Write in the LANGUAGE OF THE STORY.
+`Write a SHORT card (2-3 lines) for a minor character named {{name}}, so {{char}} can portray them. Keep it consistent with the world, the current scene and the story so far. ALWAYS write in English, even if the story is in another language.
 
 BRIEF (from the director): {{name}} — {{brief}}
 
@@ -208,6 +208,7 @@ function dcfg() {
     if (typeof c.npcMega !== "boolean") c.npcMega = false;                        // кнопка «Прокачать» делает мега-досье (иначе среднее) — по умолч. ВЫКЛ
     if (typeof c.npcPrompt !== "string" || !c.npcPrompt) c.npcPrompt = DEFAULT_NPC_PROMPT;         // промпт «средняя прокачка»
     if (typeof c.npcMegaPrompt !== "string" || !c.npcMegaPrompt) c.npcMegaPrompt = DEFAULT_NPC_MEGA_PROMPT; // промпт «мега-прокачка»
+    if (c.npcPromptVer !== 2) { c.npcPrompt = DEFAULT_NPC_PROMPT; c.npcMegaPrompt = DEFAULT_NPC_MEGA_PROMPT; c.npcPromptVer = 2; } // разово сбросить к новым дефолтам (English)
     if (typeof c.showWorld !== "boolean") c.showWorld = false;                    // давать персонажу состояние мира (World.md → промпт, SYSTEM-фон) — по умолч. ВЫКЛ
     // при апгрейде версии промпта — один раз форс-сброс промпта и определений к новым (английским) дефолтам
     if (c.promptVer !== PROMPT_VER) { c.prompt = DEFAULT_PROMPT; c.eventDefs = { ...DEFAULT_EVENT_DEFS }; c.preset = PRESET_KEYS[0]; c.promptVer = PROMPT_VER; }
@@ -468,10 +469,10 @@ async function npcFleshOut(name, { tier = "medium", seed = "", queued = false } 
 // Окно при создании NPC: имя + набросок режиссёра (транслит) + промт.
 // Режимы «Прокачать»/«Прокачать сильнее» подсвечиваются при выборе, «Применить» — снизу, применяет.
 // Применить: режим «сильнее»→мега, «Прокачать»→средняя, режим не выбран + промт→слабая, ничего→как есть.
-async function showNpcCreatePopup(np) {
+async function showNpcCreatePopup(np, descOverride) {
     const name0 = String(np?.name || "").trim();
     if (!name0) return;
-    const desc = npcCard(name0, np.archetype, np.personality);
+    const desc = (descOverride != null) ? String(descOverride) : npcCard(name0, np.archetype, np.personality);
     const html = `
     <div class="objective_prompt_modal">
         <h4 style="margin:.2em 0 .4em;">🎬 В следующей сцене появится персонаж</h4>
@@ -702,6 +703,11 @@ async function renderNpcList() {
         flesh.title = mega ? "Мега-прокачка — полное досье" : "Прокачать — карточка (средняя)";
         flesh.style.cssText = "cursor:pointer; opacity:.7;";
         flesh.addEventListener("click", () => npcFleshOut(n.name, { tier: mega ? "mega" : "medium", queued: true }));
+        const regen = document.createElement("span");
+        regen.className = "fa-solid fa-arrows-rotate interactable";
+        regen.title = "Перегенерировать — то же окно, что при создании (промт/режим)";
+        regen.style.cssText = "cursor:pointer; opacity:.7;";
+        regen.addEventListener("click", () => showNpcCreatePopup({ name: n.name }, n.content));
         const edit = document.createElement("span");
         edit.className = "fa-solid fa-pencil interactable";
         edit.title = "Редактировать персонажа";
@@ -720,7 +726,7 @@ async function renderNpcList() {
         const desc = document.createElement("small");
         desc.style.cssText = "opacity:.6; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0;";
         desc.textContent = n.content;
-        row.appendChild(chip); row.appendChild(flesh); row.appendChild(edit); row.appendChild(del); row.appendChild(desc);
+        row.appendChild(chip); row.appendChild(flesh); row.appendChild(regen); row.appendChild(edit); row.appendChild(del); row.appendChild(desc);
         host.appendChild(row);
     }
 }
@@ -1046,7 +1052,8 @@ async function directorPass(forceType = null, suppressEvent = false) {
             const active = await npcActiveNames();
             prompt += `\n\nNPCs ALREADY ON SCENE: ${active.length ? active.join(", ") : "(none)"}.\n`
                 + `Do NOT re-introduce anyone already on scene: never emit a "visitor" event and never fill "npc" for a name in that list — they are ALREADY here, their arrival already happened. Use "visitor"/"npc" ONLY for a genuinely new person not in the list.\n`
-                + `Also add a field "npc_remove": [] — the exact names of any on-scene NPC who CLEARLY left THIS turn (said goodbye, walked away, was sent off, died); otherwise []. Never remove someone just to tidy up; a silent NPC stays.`;
+                + `Also add a field "npc_remove": [] — the exact names of any on-scene NPC who CLEARLY left THIS turn (said goodbye, walked away, was sent off, died); otherwise []. Never remove someone just to tidy up; a silent NPC stays.\n`
+                + `Write the "npc" fields (name, archetype, personality) in ENGLISH, even if the story is in another language.`;
         }
         const raw = await generateRaw({ prompt, systemPrompt: dirSys(), responseLength: dcfg().maxTokens });
         const plan = parsePlan(raw);
